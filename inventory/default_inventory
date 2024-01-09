@@ -1,0 +1,17 @@
+# example inventory file for ansible
+# this can live in ./hosts or be referenced by ansible-playbook -i /path/to/inventory
+# can be a list of hosts or groups of hosts
+# hosts can be IP addresses or domain names
+# [webservers]
+# foo.example.com
+# bar.example.com
+# [dbservers]
+# one.example.com
+# two.example.com
+# [local]
+# localhost ansible_connection=local
+# [local:vars]
+# ansible_python_interpreter=/usr/bin/python3
+
+[local]
+localhost 

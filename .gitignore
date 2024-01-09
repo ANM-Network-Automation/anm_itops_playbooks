@@ -1,0 +1,6 @@
+*vault*
+*.pem
+*.key
+*.crt
+local_*
+exmple_*
