@@ -1,2 +1,5 @@
 # load required python modules
-# 
+
+ansible-pylibssh
+pyats
+genie 
