@@ -27,7 +27,7 @@
 
 
 ##IOS Tasks##
-    - name: enable snmp on device
+    - name: enable syslog on device
       ios_config:
         lines:
           - service timestamps debug datetime msec localtime show-timezone year
@@ -36,9 +36,10 @@
           - logging trap informational
           - logging origin-id hostname
           - "logging host {{ collector_ip }}"
-          - "snmp-server community {{ snmp_string}} RO {{ acl_name }}"
-        match: line
+        match: exact
       when: ansible_network_os == 'cisco.ios.ios'
+      vars:
+        ansible_command_timeout: 60
 
     - name: save running to startup when modified
       ios_config:
