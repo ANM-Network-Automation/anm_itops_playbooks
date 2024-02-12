@@ -48,7 +48,7 @@
 
 #NXOS Tasks
 
-    - name: enable snmp on nexus device
+    - name: enable syslog on nexus device
       cisco.nxos.nxos_config:
         lines:
           - logging logfile messages 6
