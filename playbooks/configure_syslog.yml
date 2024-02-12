@@ -1,0 +1,61 @@
+#example execution of this playbook
+#ansible-playbook configure_syslog.yml --ask-vault-password
+---
+
+- name: Get collector ip address
+  hosts: localhost
+  gather_facts: yes
+  tasks:
+    - set_fact: 
+        collector_ip: "{{ansible_facts['all_ipv4_addresses'][0]}}"
+
+- name: Enable syslog on IOS and NXOS devices
+  hosts: all
+  gather_facts: no
+  #vars_files:  ##uncomment and update this section to use a vault file for password
+  #  - ../passwords.yml
+  vars:
+    ansible_connection: network_cli
+
+  tasks: 
+    - name: Determine OS
+      ansible.builtin.include_tasks:
+        file: get_os.yml
+
+    - set_fact:
+        collector_ip: "{{hostvars['localhost']['collector_ip']}}"
+
+
+##IOS Tasks##
+    - name: enable syslog on device
+      ios_config:
+        lines:
+          - service timestamps debug datetime msec localtime show-timezone year
+          - service timestamps log datetime msec localtime show-timezone year
+          - service sequence-numbers
+          - logging trap informational
+          - logging origin-id hostname
+          - "logging host {{ collector_ip }}"
+        match: exact
+      when: ansible_network_os == 'cisco.ios.ios'
+      vars:
+        ansible_command_timeout: 60
+
+    - name: save running to startup when modified
+      ios_config:
+        save_when: changed
+      when: ansible_network_os == 'cisco.ios.ios'
+
+#NXOS Tasks
+
+    - name: enable snmp on nexus device
+      cisco.nxos.nxos_config:
+        lines:
+          - logging logfile messages 6
+          - "logging server {{ collector_ip }} 6 use-vrf management"
+          - logging timestamp milliseconds
+          - logging origin-id hostname
+          - logging monitor 6
+          - no logging rate-limit
+        match: line
+      when: ansible_network_os == 'cisco.nxos.nxos'
