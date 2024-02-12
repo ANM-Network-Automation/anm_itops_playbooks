@@ -45,3 +45,17 @@
       ios_config:
         save_when: changed
       when: ansible_network_os == 'cisco.ios.ios'
+
+#NXOS Tasks
+
+    - name: enable snmp on nexus device
+      cisco.nxos.nxos_config:
+        lines:
+          - logging logfile messages 6
+          - "logging server {{ collector_ip }} 6 use-vrf management"
+          - logging timestamp milliseconds
+          - logging origin-id hostname
+          - logging monitor 6
+          - no logging rate-limit
+        match: line
+      when: ansible_network_os == 'cisco.nxos.nxos'
