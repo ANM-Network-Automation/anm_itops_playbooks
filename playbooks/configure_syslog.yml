@@ -59,3 +59,9 @@
           - no logging rate-limit
         match: line
       when: ansible_network_os == 'cisco.nxos.nxos'
+      
+    - name: save running to startup when modified
+      cisco.nxos.nxos_config:
+        save_when: changed
+      when: ansible_network_os == 'cisco.nxos.nxos'
+ 
