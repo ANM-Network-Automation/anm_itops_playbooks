@@ -52,7 +52,7 @@
       cisco.nxos.nxos_config:
         lines:
           - logging logfile messages 6
-          - "logging server {{ collector_ip }} 6 use-vrf management"
+          - "logging server {{ collector_ip }} 6 use-vrf {{ syslog_vrf | default("management")}}"
           - logging timestamp milliseconds
           - logging origin-id hostname
           - logging monitor 6
