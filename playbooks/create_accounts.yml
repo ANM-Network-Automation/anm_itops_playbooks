@@ -13,6 +13,7 @@
     ace_name: []
     source_network: []
     ansible_connection: network_cli
+    update_password: always
 
   tasks: 
     - name: Determine OS
@@ -26,5 +27,5 @@
         password_type: secret
         privilege: 15
         update_password: "{{ update_password | default('on_create') }}"
-        no_log: true
+      no_log: true
       when: ansible_network_os == 'cisco.ios.ios'
