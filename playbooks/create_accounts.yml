@@ -26,4 +26,5 @@
         password_type: secret
         privilege: 15
         update_password: "{{ update_password | default('on_create') }}"
+        no_log: true
       when: ansible_network_os == 'cisco.ios.ios'
