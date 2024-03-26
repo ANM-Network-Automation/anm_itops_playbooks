@@ -1,5 +1,9 @@
 #example execution of this playbook
-#ansible-playbook create_accounts.yml -e "new_password=test update_password=on_create"
+#Add the update_password=always var to change password
+#Add the remove_user var to remove users
+#Add the add_user to add users
+#Example with multiple vars, add or remove vars as needed
+#ansible-playbook create_accounts.yml -e "add_user=testuser add_password=test update_password=always"
 ---
 
 - name: Add & Remove Users to NXOS and IOS devices
@@ -15,12 +19,47 @@
       ansible.builtin.include_tasks:
         file: get_os.yml
 
-    - name: Add a user specifying password type
+#IOS Tasks#
+
+    - name: Add an IOS user specifying password type
       cisco.ios.ios_user:
-        name: ansibletest4
-        configured_password: "{{ new_password }}"
+        name: "{{ add_user }}"
+        configured_password: "{{ add_password }}"
         password_type: secret
         privilege: 15
         update_password: "{{ update_password | default('on_create') }}"
       no_log: true
+      when: ansible_network_os == 'cisco.ios.ios' and add_user is defined
+    
+    - name: Remove IOS user
+      cisco.ios.ios_user:
+        name: "{{ remove_user }}"
+        state: absent 
+      when: ansible_network_os == 'cisco.ios.ios' and remove_user is defined
+
+    - name: save running to startup when modified for IOS
+      ios_config:
+        save_when: changed
       when: ansible_network_os == 'cisco.ios.ios'
+
+#NXOS Tasks#
+
+    - name: Create a new NXOS  user
+      cisco.nxos.nxos_user:
+        name: "{{ add_user }}"
+        configured_password: "{{ add_password }}"
+        role: network-admin
+        update_password: "{{ update_password | default('on_create') }}"
+      no_log: true
+      when: ansible_network_os == 'cisco.nxos.nxos' and add_user is defined
+
+    - name: remove all users except admin
+      cisco.nxos.nxos_user:
+        name: "{{ remove_user }}"
+        state: absent 
+      when: ansible_network_os == 'cisco.nxos.nxos' and remove_user is defined
+
+    - name: save running to startup when modified
+      cisco.nxos.nxos_config:
+        save_when: changed
+      when: ansible_network_os == 'cisco.nxos.nxos'
