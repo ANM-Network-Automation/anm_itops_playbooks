@@ -3,7 +3,7 @@
 #Add the remove_user var to remove users
 #Add the add_user to add users
 #Example with multiple vars, add or remove vars as needed
-#ansible-playbook create_accounts.yml -e "add_user=testuser add_password=test update_password=always"
+#ansible-playbook create_accounts.yml -e "add_user=testuser add_password=test update_password=always" -u admin -k
 ---
 
 - name: Add & Remove Users to NXOS and IOS devices
