@@ -1,0 +1,26 @@
+#example execution of this playbook
+#ansible-playbook create_accounts.yml -e "new_password=test update_password=on_create"
+---
+
+- name: Add & Remove Users to NXOS and IOS devices
+  hosts: all
+  gather_facts: no
+  #vars_files:  ##uncomment and update this section to use a vault file for password
+  #  - ../passwords.yml
+  vars:
+    ansible_connection: network_cli
+
+  tasks: 
+    - name: Determine OS
+      ansible.builtin.include_tasks:
+        file: get_os.yml
+
+    - name: Add a user specifying password type
+      cisco.ios.ios_user:
+        name: ansibletest4
+        configured_password: "{{ new_password }}"
+        password_type: secret
+        privilege: 15
+        update_password: "{{ update_password | default('on_create') }}"
+      no_log: true
+      when: ansible_network_os == 'cisco.ios.ios'
