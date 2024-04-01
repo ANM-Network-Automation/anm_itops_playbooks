@@ -29,10 +29,10 @@ to create an inventory form MS customer assets use the Splunk dashboard: https:/
 ### `update_snmp_acl`
 This playbook updates the SNMP ACL on one or more devices to allow this host's IP address.
 
-**Variables**
+**Variables**   
 - `snmp_string`: The SNMP string to use
 
-**Examples**
+**Examples**   
 ```bash
 ansible-playbook update_snmp_acl.yml -e "snmp_string=public" -u admin -k
 ```
@@ -42,13 +42,13 @@ ansible-playbook update_snmp_acl.yml -e "snmp_string=public" -u admin -k
 ### `create_accounts`
 This playbook creates/ updates ot deletes accounts on one or more devices.
 
-**Variables**
+**Variables**   
 - `update_password` (optional): If set to "always", the password will be updated, even if the user already exists. If not defined passwords will only be set for new users
 - `remove_user` (optional): If set to a username, the user will be removed from the device.
 - `add_user` (optional): If set to a username, the user will be added to the device.  
 - `add_password` (required for `add_user` and `update_password`): The password to set for the user.
   
-**Examples**
+**Examples**   
 Add a user
 ```bash
 ansible-playbook create_accounts.yml -e "add_user=testuser add_password=testpassword" -u admin -k
