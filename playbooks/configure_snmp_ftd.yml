@@ -34,9 +34,6 @@
       set_fact:
         matched_items: "{{ matched_items + [item.1] }}"
       loop: "{{ snmp_hosts['json']['items']|product(network_objects['json']['items'])|list }}"
-      #with_nested:
-      #  - "{{ snmp_hosts['json']['items'] }}"
-      #  - "{{ network_objects['json']['items'] }}"
       when: item.0['managerAddress']['id'] == item.1['id']
       vars:
         matched_items: []
