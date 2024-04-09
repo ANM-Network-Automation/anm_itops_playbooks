@@ -1,0 +1,131 @@
+  - block:
+    - name: Login
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/api/fdm/latest/fdm/token"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          username: "{{ ansible_user }}"
+          password: "{{ ansible_password }}"
+          grant_type: password
+          desired_expires_in: 1800
+        validate_certs: false
+      register: login
+
+    - name: Get all SNMP hosts
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/api/fdm/latest/object/snmphosts"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ login['json']['access_token'] }}"
+        validate_certs: false
+      register: snmp_hosts
+      
+    - name: Get network objects
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/api/fdm/latest/object/networks"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ login['json']['access_token'] }}"
+        validate_certs: false
+      register: network_objects   
+
+    - name: Match items and add to new list
+      set_fact:
+        matched_items: "{{ matched_items + [item.1] }}"
+      loop: "{{ snmp_hosts['json']['items']|product(network_objects['json']['items'])|list }}"
+      #with_nested:
+      #  - "{{ snmp_hosts['json']['items'] }}"
+      #  - "{{ network_objects['json']['items'] }}"
+      when: item.0['managerAddress']['id'] == item.1['id']
+      vars:
+        matched_items: []
+
+    - name: Check if collector is already a host
+      set_fact:
+        host_exists: "{{ item }}"
+      loop: "{{ matched_items }}"
+      when: item['value'] == collector_ip
+
+    - name: Create network object for collector
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/api/fdm/latest/object/networks"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ login['json']['access_token'] }}"
+        validate_certs: false
+        method: POST
+        body_format: json
+        body:
+          name: "ANM_SNMP_{{ collector_ip }}"
+          subType: HOST
+          value: "{{ collector_ip }}"
+          type: networkobject
+        status_code: 200
+      register: snmp_object
+      when: host_exists is undefined
+
+    - name: Get all interfaces
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/api/fdm/latest/devices/default/interfaces"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ login['json']['access_token'] }}"
+        validate_certs: false
+      register: all_interfaces
+      when: host_exists is undefined
+
+    - name: Get diag interface
+      set_fact:
+        diag_interface: "{{ item }}"
+      loop: "{{ all_interfaces['json']['items'] }}"
+      when: host_exists is undefined and item['name'] == "diagnostic"
+
+    - name: Create new SNMP host for collector
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/api/fdm/latest/object/snmphosts"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ login['json']['access_token'] }}"
+        validate_certs: false
+        method: POST
+        body_format: json
+        body:
+          name: "ANM_SNMP_{{ collector_ip }}"
+          interface:
+            id: "{{ diag_interface['id'] }}"
+            type: "{{ diag_interface['type'] }}"
+            name: "{{ diag_interface['name'] }}"
+          managerAddress:
+            version: "{{ snmp_object['json']['version'] }}"
+            name: "{{ snmp_object['json']['name'] }}"
+            id: "{{ snmp_object['json']['id'] }}"
+            type: "{{ snmp_object['json']['type'] }}"
+          udpPort: 162
+          pollEnabled: true
+          trapEnabled: false
+          securityConfiguration:
+            community: "{{ snmp_string | default('ANM_MS_R0') }}"
+            type: "snmpv2csecurityconfiguration"
+          type: snmphost
+
+        status_code: 200
+      register: snmp_object
+      when: host_exists is undefined
+
+    - name: Deploy the changes
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/api/fdm/latest/operational/deploy"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ login['json']['access_token'] }}"
+        validate_certs: false
+        method: POST
+        status_code: 200
+      register: deploy
+      when: host_exists is undefined
+
+    rescue:
+      - name: Login failure
+        ansible.builtin.debug:
+            msg: "Login failure on {{ inventory_hostname }}."

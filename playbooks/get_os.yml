@@ -1,18 +1,19 @@
 ---
-   - block:
+   - name: Log into device to determine Network OS
+     block:
       - name: Get raw show version
         ansible.builtin.raw: show version
         register: show_version
         vars:
          ansible_connection: ssh
 
-##IOS Tasks
-
+## IOS Tasks
+      #Check of os is running IOS
       - set_fact: 
           ios_check: "{{show_version['stdout'] | regex_findall( 'IOS Software' )}}"
         vars:
-         ansible_connection: ssh
-
+         ansible_connection: ssh 
+      #Set OS and return OS type for further tasks
       - set_fact:
          ansible_network_os: cisco.ios.ios
         when: ios_check | length > 0
@@ -20,15 +21,55 @@
          ansible_connection: ssh
 
 ##NXOS Tasks
-
+      #Check if os is running NX-OS
       - set_fact: 
           nxos_check: "{{show_version['stdout'] | regex_findall( 'NX-OS' )}}"
         vars:
-         ansible_connection: ssh
-
+         ansible_connection: ssh 
+      #Set OS and return OS type for further tasks
       - set_fact:
          ansible_network_os: cisco.nxos.nxos
         when: nxos_check | length > 0
         vars:
          ansible_connection: ssh
+
+##Standalone FTD Tasks
+      #Check if its an FTD
+      - set_fact: 
+          ftd_check: "{{show_version['stdout'] | regex_findall( 'Cisco Firepower Threat Defense' )}}"
+        vars:
+         ansible_connection: ssh 
+
+      #Get the list of managers(FDM/FMC)
+      - name: Get raw show managers
+        ansible.builtin.raw: show managers
+        register: show_managers
+        when: ftd_check | length > 0
+        vars:
+         ansible_connection: ssh
+      #Set variable if its FDM/managed locally=FDM
+      - set_fact: 
+          fmc_check: "{{show_managers['stdout_lines'][0] | regex_findall( 'Managed locally' )}}"
+        when: ftd_check | length > 0
+        vars:
+         ansible_connection: ssh 
+      #Set OS if above task is local and return OS type for further tasks
+      - set_fact:
+         ansible_network_os: ftd
+        when: fmc_check | length > 0
+        vars:
+         ansible_connection: ssh
+
+##Catchall tasks
+      #Return none for error checking in future tasks
+      - set_fact:
+         ansible_network_os: none
+        when: ansible_network_os is undefined
+        vars:
+         ansible_connection: ssh
      when: ansible_network_os is not defined
+
+     rescue:
+      - name: Login failure
+        ansible.builtin.debug:
+            msg: "Login failure on {{ inventory_hostname }}."

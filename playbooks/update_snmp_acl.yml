@@ -28,6 +28,8 @@
 
     - set_fact:
         collector_ip: "{{hostvars['localhost']['collector_ip']}}"
+      vars:
+        ansible_connection: ssh
 
     #Query the switch to see if the ACL has been created. If not log it and we'll create it later.
     - name: Access List Block
@@ -39,6 +41,7 @@
               name: ansible.netcommon.pyats
             set_fact: access_list_output
           register: get_access_list
+          when: ansible_network_os == 'cisco.ios.ios' or ansible_network_os == 'cisco.nxos.nxos'
       rescue: 
         - name: ACL Missing from switch
           ansible.builtin.debug:
@@ -64,6 +67,7 @@
     
     - ansible.builtin.debug:
         msg: "{{ get_access_list.failed }}"
+      when: get_access_list.failed is true
 
 ##IOS Tasks##
 
@@ -137,3 +141,10 @@
         save_when: changed
       when: ansible_network_os == 'cisco.nxos.nxos'
  
+### FTD Tasks ###
+    - name: Run FTD Tasks
+      ansible.builtin.include_tasks:
+        file: configure_snmp_ftd.yml
+      when: ansible_network_os == 'ftd'
+      vars:
+        ansible_connection: local
