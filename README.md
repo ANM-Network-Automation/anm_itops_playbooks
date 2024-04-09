@@ -34,7 +34,7 @@ This playbook updates the SNMP ACL on one or more devices to allow this host's I
 
 **Examples**   
 ```bash
-ansible-playbook update_snmp_acl.yml -e "snmp_string=public" -u admin -k
+ansible-playbook playbooks/update_snmp_acl.yml -e "snmp_string=public" -u admin -k
 ```
 
 -------------------------------------------------
