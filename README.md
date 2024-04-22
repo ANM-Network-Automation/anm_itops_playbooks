@@ -86,6 +86,7 @@ This playbook creates a readonly group and configures a snmpv3 user
 **Examples**   
 Add a user
 ```bash
-ansible-playbook configure_snmpv3.yml -e "snmpv3_user=testuser auth_password=Ab39NnC4N3acYABat7AD privacy_password=Ah7Dbh7ABCDARx7nNAjJ"
+ansible-playbook configure_snmpv3.yml -e "snmpv3_user=testuser auth_password=Ab39NnC4N3acYABat7AD privacy_password=Ah7Dbh7ABCDARx7nNAjJ"  -u admin -k
+
 ```
 
