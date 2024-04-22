@@ -39,7 +39,7 @@
 
     - name: save running to startup when modified for IOS
       ios_config:
-        save_when: changed
+        save_when: modified
       when: ansible_network_os == 'cisco.ios.ios'
 
 #NXOS Tasks#
