@@ -1,0 +1,79 @@
+#example execution of this playbook
+#ansible-playbook configure_snmpv3.yml -e "snmpv3_user=testuser auth_password=test privacy_password=test"
+---
+
+- name: Get collector ip address
+  hosts: localhost
+  gather_facts: yes
+  tasks:
+    - set_fact: 
+        collector_ip: "{{ansible_facts['all_ipv4_addresses'][0]}}"
+
+- name: Create SNMP ACL and enable SNMP
+  hosts: all
+  gather_facts: no
+  #vars_files:  ##uncomment and update this section to use a vault file for password
+  #  - ../passwords.yml
+  vars:
+    ansible_connection: network_cli
+
+  tasks: 
+    - name: Determine OS
+      ansible.builtin.include_tasks:
+        file: get_os.yml
+
+    - set_fact:
+        collector_ip: "{{hostvars['localhost']['collector_ip']}}"
+      vars:
+        ansible_connection: ssh
+
+#IOS Tasks
+
+    - name: Setup ReadOnly views for IOS
+      ios_config:
+        lines:
+          - "snmp-server view fullview iso included"
+          - "snmp-server view noview iso excluded"
+        match: line
+      when: ansible_network_os == 'cisco.ios.ios'
+
+    - name: Setup ReadOnly snmpv3 group for IOS
+      ios_config:
+        lines:
+          - "snmp-server group readonly v3 priv read fullview write noview"
+        match: line
+      when: ansible_network_os == 'cisco.ios.ios'
+
+    - name: Setup ReadOnly user using auth keys
+      ios_config:
+        lines:
+          - "snmp-server user {{ snmpv3_user }} readonly v3 auth sha {{ auth_password }} priv aes 128 {{ privacy_password }}"
+        match: line
+      when: ansible_network_os == 'cisco.ios.ios'
+
+    - name: save running to startup when modified for IOS
+      ios_config:
+        save_when: changed
+      when: ansible_network_os == 'cisco.ios.ios'
+
+#NXOS Tasks#
+
+    - name: Setup ReadOnly snmpv3 group for NXOS
+      cisco.nxos.nxos_config:
+        lines:
+          - role name readonly
+          - rule 1 permit read
+        match: none
+      when: ansible_network_os == 'cisco.nxos.nxos'
+
+    - name: Setup ReadOnly user using auth keys for NXOS
+      cisco.nxos.nxos_config:
+        lines:
+          - "snmp-server user {{ snmpv3_user }} readonly auth sha {{ auth_password }} priv {{ privacy_password }}"
+        match: line
+      when: ansible_network_os == 'cisco.nxos.nxos'
+
+    - name: save running to startup when modified
+      cisco.nxos.nxos_config:
+        save_when: changed
+      when: ansible_network_os == 'cisco.nxos.nxos'
