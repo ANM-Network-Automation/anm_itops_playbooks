@@ -2,12 +2,14 @@
 
 This is a collection of playbooks for ANM ITOps automation
 
-- [Setup](#setup)
-  - [General Setup](#general-setup)
-  - [Create Inventory](#create-inventory)
-- [Playbooks](#playbooks)
-  - [`update_snmp_acl`](#update_snmp_acl)
-  - [`create_accounts`](#create_accounts)
+- [ANM ITOps Playbooks](#anm-itops-playbooks)
+  - [Setup](#setup)
+    - [General Setup](#general-setup)
+    - [Create Inventory](#create-inventory)
+  - [Playbooks](#playbooks)
+    - [`update_snmp_acl`](#update_snmp_acl)
+    - [`create_accounts`](#create_accounts)
+    - [`configure_snmpv3`](#configure_snmpv3)
 
 
 ## Setup
@@ -63,3 +65,21 @@ Update a user's password
 ```bash
 ansible-playbook playbooks/create_accounts.yml -e "update_password=always add_user=testuser add_password=testpassword" -u admin -k
 ```
+-------------------------------------------------
+
+### `configure_snmpv3`
+This playbook creates a readonly group and configures a snmpv3 user
+
+**Variables**   
+- `snmpv3_user` (required): Username of the snmpv3 user to be given access
+- `auth_password` (required): SHA encrypted password. This is NOT the plaintext password.
+- `privacy_password` (required): AES 128 encrypted privacy password. This is NOT the plaintext password.
+
+
+  
+**Examples**   
+Add a user
+```bash
+ansible-playbook configure_snmpv3.yml -e "snmpv3_user=testuser auth_password=Ab39NnC4N3acYABat7AD privacy_password=Ah7Dbh7ABCDARx7nNAjJ"
+```
+
