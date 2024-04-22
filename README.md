@@ -31,6 +31,12 @@ to create an inventory from MS customer assets use the Splunk dashboard: https:/
 ### `update_snmp_acl`
 This playbook updates the SNMP ACL on one or more devices to allow this host's IP address.
 
+Supported OS:
+* IOS
+* IOS=XE
+* NX-OS
+* FTD (via FDM)
+
 **Variables**   
 - `snmp_string`: The SNMP string to use
 
