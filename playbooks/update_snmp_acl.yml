@@ -20,6 +20,7 @@
     ace_name: []
     source_network: []
     ansible_connection: network_cli
+    ansible_command_timeout: 120
 
   tasks: 
     - name: Determine OS
@@ -87,16 +88,16 @@
     - name: load new entry into existing acl
       ios_config:
         lines:
-          - "{{ ace_name | last  | int + 10 }} permit ip host {{ collector_ip }} any log"
-        parents: ip access-list extended {{ acl_name }}
+          - "{{ ace_name | last  | int + 10 }} permit host {{ collector_ip }} log"
+        parents: ip access-list standard {{ acl_name }}
         match: line
       when: (source_network | length < 1) and (ansible_network_os == 'cisco.ios.ios') and (get_access_list.failed is false) 
 
     - name: load new entry into new acl
       ios_config:
         lines:
-          - "10 permit ip host {{ collector_ip }} any log"
-        parents: ip access-list extended {{ acl_name }}
+          - "10 permit host {{ collector_ip }} log"
+        parents: ip access-list standard {{ acl_name }}
         match: line
       when: (source_network | length < 1) and (ansible_network_os == 'cisco.ios.ios') and (get_access_list.failed is true) 
 
