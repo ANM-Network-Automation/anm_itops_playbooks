@@ -1,0 +1,42 @@
+#example execution of this playbook
+#ansible-playbook remove_snmp.yml -e snmp_string=welcome1 --ask-vault-password
+---
+- name: Remove SNMP v2 communities
+  hosts: all
+  gather_facts: false
+  #vars_files:  ##uncomment and update this section to use a vault file for password
+  #  - ../passwords.yml
+  vars:
+    ansible_connection: network_cli
+    ansible_command_timeout: 120
+
+  tasks: 
+    - name: Determine OS
+      ansible.builtin.include_tasks:
+        file: get_os.yml
+
+##IOS Tasks##
+    - name: remove snmp on ios device
+      ios_config:
+        lines:
+          - "no snmp-server community {{ snmp_string}}"
+        match: line
+      when: ansible_network_os == 'cisco.ios.ios'
+
+    - name: save running to startup when modified
+      ios_config:
+        save_when: changed
+      when: ansible_network_os == 'cisco.ios.ios'
+
+##NXOS Tasks##
+    - name: remove snmp on nexus device
+      cisco.nxos.nxos_config:
+        lines:
+          - "no snmp-server community {{ snmp_string }}"
+        match: line
+      when: ansible_network_os == 'cisco.nxos.nxos'
+
+    - name: save running to startup when modified
+      cisco.nxos.nxos_config:
+        save_when: changed
+      when: ansible_network_os == 'cisco.nxos.nxos'
