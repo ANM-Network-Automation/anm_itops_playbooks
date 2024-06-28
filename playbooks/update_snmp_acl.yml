@@ -4,14 +4,14 @@
 
 - name: Get collector ip address
   hosts: localhost
-  gather_facts: yes
+  gather_facts: true
   tasks:
     - set_fact: 
         collector_ip: "{{ansible_facts['all_ipv4_addresses'][0]}}"
 
 - name: Create SNMP ACL and enable SNMP
   hosts: all
-  gather_facts: no
+  gather_facts: false
   #vars_files:  ##uncomment and update this section to use a vault file for password
   #  - ../passwords.yml
   vars:
@@ -74,7 +74,7 @@
 
     - name: check for old snmp string
       cisco.ios.ios_command:
-        commands: "show run | in snmp-server host {{collector_ip}} version 2c {{snmp_string}}"
+        commands: "show run | in snmp-server host {{collector_ip}} version 2c {{snmp_string }}"
       register: old_snmp_string
       when: ansible_network_os == 'cisco.ios.ios'
 
