@@ -95,3 +95,23 @@ ansible-playbook configure_snmpv3.yml -e 'snmpv3_user=testuser auth_password=Ab3
 
 ```
 
+-------------------------------------------------
+
+### `remove_snmp`
+This playbook removes snmp community strings from the device
+
+Supported OS:
+* IOS
+* IOS=XE
+* NX-OS
+
+**Variables**   
+- `snmp_string`: The SNMP string to use
+- `enable_secret`: Optional: enable secret if device requires it
+  
+**Examples**   
+Remove snmpv2 community from a device
+```bash
+ansible-playbook remove_snmp.yml -e 'snmp_string=welcome1' --limit network -u admin -k
+
+```
