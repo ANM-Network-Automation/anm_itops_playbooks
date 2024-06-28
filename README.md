@@ -41,6 +41,7 @@ Supported OS:
 
 **Variables**   
 - `snmp_string`: The SNMP string to use
+- `enable_secret`: Optional: enable secret if device requires it
 
 **Examples**   
 ```bash
@@ -57,6 +58,7 @@ This playbook creates/ updates ot deletes accounts on one or more devices.
 - `remove_user` (optional): If set to a username, the user will be removed from the device.
 - `add_user` (optional): If set to a username, the user will be added to the device.  
 - `add_password` (required for `add_user` and `update_password`): The password to set for the user.
+- `enable_secret`: Optional: enable secret if device requires it
   
 **Examples**   
 Add a user
@@ -82,6 +84,7 @@ This playbook creates a readonly group and configures a snmpv3 user
 - `snmpv3_user` (required): Username of the snmpv3 user to be given access
 - `auth_password` (required): SHA encrypted password. This is NOT the plaintext password.
 - `privacy_password` (required): AES 128 encrypted privacy password. This is NOT the plaintext password.
+- `enable_secret`: Optional: enable secret if device requires it
 
 
   
