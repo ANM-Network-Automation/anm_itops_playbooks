@@ -1,6 +1,15 @@
 ---
    - name: Log into device to determine Network OS
      block:
+      - name: Set enable secret
+        set_fact:
+          ansible_become: true
+          ansible_become_method: enable
+          ansible_become_password: "{{ enable_secret }}"
+        when: enable_secret is defined
+        vars:
+         ansible_connection: ssh
+
       - name: Get raw show version
         ansible.builtin.raw: show version
         register: show_version
