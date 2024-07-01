@@ -10,6 +10,7 @@ This is a collection of playbooks for ANM ITOps automation
     - [`update_snmp_acl`](#update_snmp_acl)
     - [`create_accounts`](#create_accounts)
     - [`configure_snmpv3`](#configure_snmpv3)
+    - [`remove_snmp`](#remove_snmp)
 
 
 ## Setup
