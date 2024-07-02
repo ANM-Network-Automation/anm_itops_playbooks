@@ -24,7 +24,7 @@
         extended: yes
       vars:
         seq: "{{ (item.0 + 1) * 10 }}"
-      when: remove is undefined
+      when: remove is undefined and ansible_network_os == 'cisco.ios.ios'
 
     - name: Load new entries into new ACL
       ios_config:
@@ -33,13 +33,13 @@
           - "ip access-list standard {{ acl_name }}"
         match: line
       with_items: "{{ acl_lines }}"
-      when: remove is undefined
+      when: remove is undefined and ansible_network_os == 'cisco.ios.ios'
 
     - name: Assign new ACL to http-server
       ios_config:
         lines: "ip http access-class ipv4 {{ acl_name }}"
         match: line
-      when: remove is undefined
+      when: remove is undefined and ansible_network_os == 'cisco.ios.ios'
 
     - name: Remove http server
       ios_config:
@@ -47,4 +47,4 @@
           - "no ip http server"
           - "no ip http secure-server"
         match: line
-      when: remove | bool
+      when: remove is defined and remove | bool and ansible_network_os == 'cisco.ios.ios'
