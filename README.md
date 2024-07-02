@@ -11,7 +11,7 @@ This is a collection of playbooks for ANM ITOps automation
     - [`create_accounts`](#create_accounts)
     - [`configure_snmpv3`](#configure_snmpv3)
     - [`remove_snmp`](#remove_snmp)
-
+    - [`http_server`](#http_server)
 
 ## Setup
 ### General Setup
@@ -114,5 +114,26 @@ Supported OS:
 Remove snmpv2 community from a device
 ```bash
 ansible-playbook remove_snmp.yml -e 'snmp_string=welcome1' --limit network -u admin -k
+
+```
+-------------------------------------------------
+
+### `http_server`
+This playbook adds an ACL to an existing http-server enabled switch. Also supports removing the http-server config
+
+Supported OS:
+* IOS
+* IOS=XE
+
+**Variables**   
+- `acl_ips`: Required if remove not set. Type List of string. These are the subnets that will be put into the ACL. Example. acl_ips=["10.16.0.0 0.0.255.255", "10.17.0.0 0.0.255.255"]
+- `acl_name`: Required if remove not set. Type string. The name of the ACL that will be applied to the http-server
+- `remove`: Required if acl_ips and acl_name are not set. Type bool. Set to "true" to remove the http-server config from the switch. This is mutually exclusive to the acl_ips and acl_name variables. Do not set this and acl_ips/acl_name.
+- `enable_secret`: Optional: enable secret if device requires it
+  
+**Examples**   
+Remove snmpv2 community from a device
+```bash
+ansible-playbook http_server.yml -i inventory.ini -e acl_name=test_acl --limit network -u admin -k
 
 ```
