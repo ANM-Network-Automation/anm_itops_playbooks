@@ -46,7 +46,7 @@ Supported OS:
 
 **Examples**   
 ```bash
-ansible-playbook playbooks/update_snmp_acl.yml -e "snmp_string=public" --limit network -u admin -k
+ansible-playbook playbooks/update_snmp_acl.yml -e 'snmp_string=public enable_secret=SOMESECRET' --limit network -u admin -k
 ```
 
 -------------------------------------------------
@@ -64,17 +64,17 @@ This playbook creates/ updates ot deletes accounts on one or more devices.
 **Examples**   
 Add a user
 ```bash
-ansible-playbook playbooks/create_accounts.yml -e 'add_user=testuser add_password=testpassword' --limit network -u admin -k
+ansible-playbook playbooks/create_accounts.yml -e 'add_user=testuser add_password=testpassword enable_secret=SOMESECRET' --limit network -u admin -k
 ```
 
 Remove a user
 ```bash
-ansible-playbook playbooks/create_accounts.yml -e 'remove_user=testuser' --limit network -u admin -k
+ansible-playbook playbooks/create_accounts.yml -e 'remove_user=testuser enable_secret=SOMESECRET' --limit network -u admin -k
 ```
 
 Update a user's password
 ```bash
-ansible-playbook playbooks/create_accounts.yml -e 'update_password=always add_user=testuser add_password=testpassword' --limit network -u admin -k
+ansible-playbook playbooks/create_accounts.yml -e 'update_password=always add_user=testuser add_password=testpassword enable_secret=SOMESECRET' --limit network -u admin -k
 ```
 -------------------------------------------------
 
@@ -92,7 +92,7 @@ This playbook creates a readonly group and configures a snmpv3 user
 **Examples**   
 Add a user
 ```bash
-ansible-playbook configure_snmpv3.yml -e 'snmpv3_user=testuser auth_password=Ab39NnC4N3acYABat7AD privacy_password=Ah7Dbh7ABCDARx7nNAjJ' --limit network -u admin -k
+ansible-playbook configure_snmpv3.yml -e 'snmpv3_user=testuser auth_password=Ab39NnC4N3acYABat7AD privacy_password=Ah7Dbh7ABCDARx7nNAjJ enable_secret=SOMESECRET' --limit network -u admin -k
 
 ```
 
