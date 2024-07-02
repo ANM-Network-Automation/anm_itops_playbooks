@@ -1,0 +1,50 @@
+#example execution of this playbook
+#ansible-playbook http_server.yml -i inventory.ini -u admin -k -e acl_name=http_acl
+---
+
+- name: Create new standard acl and apply to http-server on IOS device
+  hosts: all
+  gather_facts: false
+
+  vars:
+    ansible_connection: network_cli
+    ansible_command_timeout: 120
+    acl_lines: []
+
+  tasks: 
+    - name: Determine OS
+      ansible.builtin.include_tasks:
+        file: get_os.yml
+
+    - name: Generate ACL lines with sequence numbers
+      set_fact:
+        acl_lines: "{{ acl_lines + [{'line': seq ~ ' permit ' ~ item.1 ~ ' log'}] }}"
+      with_indexed_items: "{{ acl_ips }}"
+      loop_control:
+        extended: yes
+      vars:
+        seq: "{{ (item.0 + 1) * 10 }}"
+      when: remove is undefined
+
+    - name: Load new entries into new ACL
+      ios_config:
+        lines: "{{ item.line }}"
+        parents:
+          - "ip access-list standard {{ acl_name }}"
+        match: line
+      with_items: "{{ acl_lines }}"
+      when: remove is undefined
+
+    - name: Assign new ACL to http-server
+      ios_config:
+        lines: "ip http access-class ipv4 {{ acl_name }}"
+        match: line
+      when: remove is undefined
+
+    - name: Remove http server
+      ios_config:
+        lines: 
+          - "no ip http server"
+          - "no ip http secure-server"
+        match: line
+      when: remove | bool
