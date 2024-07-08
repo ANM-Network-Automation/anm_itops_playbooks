@@ -36,7 +36,7 @@ This playbook updates the SNMP ACL on one or more devices to allow this host's I
 
 Supported OS:
 * IOS
-* IOS=XE
+* IOS/XE
 * NX-OS
 * FTD (via FDM)
 
@@ -103,7 +103,7 @@ This playbook removes snmp community strings from the device
 
 Supported OS:
 * IOS
-* IOS=XE
+* IOS/XE
 * NX-OS
 
 **Variables**   
@@ -123,7 +123,7 @@ This playbook adds an ACL to an existing http-server enabled switch. Also suppor
 
 Supported OS:
 * IOS
-* IOS=XE
+* IOS/XE
 
 **Variables**   
 - `acl_ips`: Required if remove not set. Type List of string. These are the subnets that will be put into the ACL. Example. acl_ips=["10.16.0.0 0.0.255.255", "10.17.0.0 0.0.255.255"]
@@ -132,8 +132,18 @@ Supported OS:
 - `enable_secret`: Optional: enable secret if device requires it
   
 **Examples**   
-Remove snmpv2 community from a device
+Add new ACL to a device with acl_ips defined in inventory.ini
 ```bash
 ansible-playbook http_server.yml -i inventory.ini -e acl_name=test_acl --limit network -u admin -k
+
+```
+Add new ACL to a device with acl_ips defined on CLI
+```bash
+ansible-playbook http_server.yml -i inventory.ini -e 'acl_name=test_acl acl_ips=["10.16.0.0 0.0.255.255", "10.17.0.0 0.0.255.255"]' --limit network -u admin -k
+
+```
+Remove http-server config from device
+```bash
+ansible-playbook http_server.yml -i inventory.ini -e 'remove=true' --limit network -u admin -k
 
 ```
