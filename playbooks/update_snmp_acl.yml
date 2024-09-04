@@ -16,7 +16,7 @@
   #vars_files:  ##uncomment and update this section to use a vault file for password
   #  - ../passwords.yml
   vars:
-    acl_name: anm-ms-snmp-acl
+    acl_name: anm-ms-snmp-acl-std
     ace_entry: []
     ace_name: []
     source_network: []
