@@ -8,6 +8,7 @@
   tasks:
     - set_fact: 
         collector_ip: "{{ansible_facts['all_ipv4_addresses'][0]}}"
+      when: collector_ip is undefined and collector_ips is undefined
 
 - name: Create SNMP ACL and enable SNMP
   hosts: all
@@ -31,7 +32,8 @@
         collector_ip: "{{hostvars['localhost']['collector_ip']}}"
       vars:
         ansible_connection: ssh
-
+      when: collector_ip is undefined and collector_ips is undefined
+    
     #Query the switch to see if the ACL has been created. If not log it and we'll create it later.
     - name: Access List Block
       block:
@@ -60,11 +62,36 @@
       loop: "{{ ace_entry }}"
       when: get_access_list.failed is false
 
+    - name: Convert ACE name strings to integers and sort the list
+      set_fact:
+        sorted_ace_name: "{{ ace_name | map('int') | sort | map('string') }}"
+      when: get_access_list.failed is false
+
+    - name: Initialize base ACE number
+      set_fact:
+        base_ace_number: "{{ sorted_ace_name | last  }}"
+      when: get_access_list.failed is false
+
     #Create a list of IPs if it matches the current collector IP. This is here to see if the current collector is already in the ACL somewhere.
     - set_fact: 
         source_network: "{{ source_network + [item.matches.l3.ipv4.source_network] | regex_findall( collector_ip ) }}"
       loop: "{{ ace_entry }}"
-      when: get_access_list.failed is false
+      when: collector_ips is undefined and get_access_list.failed is false
+
+    - set_fact:
+        cleaned_collector_ips: "{{ collector_ips.split(',') | list }}"
+      when: collector_ips is defined
+
+    - name: Set source_network with collector_ip as a list
+      set_fact: 
+        source_network: "{{ source_network + [item.matches.l3.ipv4.source_network] | regex_findall(cleaned_collector_ips | join('|')) }}"
+      loop: "{{ ace_entry }}"
+      when: collector_ips is defined
+
+    - name: Remove items from updated_list1 that are in list2
+      set_fact:
+        updated_collector_ips: "{{ cleaned_collector_ips | difference(source_network) }}"
+      when: collector_ips is defined
     
     - ansible.builtin.debug:
         msg: "{{ get_access_list.failed }}"
@@ -76,22 +103,33 @@
       cisco.ios.ios_command:
         commands: "show run | in snmp-server host {{collector_ip}} version 2c {{snmp_string }}"
       register: old_snmp_string
-      when: ansible_network_os == 'cisco.ios.ios'
+      when: ansible_network_os == 'cisco.ios.ios' and collector_ip is defined
 
     - name: remove old snmp string
       ios_config:
         lines:
           - "no snmp-server host {{collector_ip}} version 2c {{snmp_string}}"
         match: line
-      when: ansible_network_os == 'cisco.ios.ios' and old_snmp_string['stdout'][0]|length > 0
+      when: ansible_network_os == 'cisco.ios.ios' and collector_ip is defined and old_snmp_string['stdout'][0]|length > 0
 
     - name: load new entry into existing acl
       ios_config:
         lines:
-          - "{{ ace_name | last  | int + 10 }} permit host {{ collector_ip }} log"
+          - "{{ (base_ace_number | int + 10 ) }} permit host {{ collector_ip }} log"
         parents: ip access-list standard {{ acl_name }}
         match: line
-      when: (source_network | length < 1) and (ansible_network_os == 'cisco.ios.ios') and (get_access_list.failed is false) 
+      when: collector_ips is undefined and (source_network | length < 1) and (ansible_network_os == 'cisco.ios.ios') and (get_access_list.failed is false) 
+
+    - name: Load new entries from list into existing ACL with incremented ACE numbers
+      ios_config:
+        lines:
+          - "{{ (base_ace_number | int + (10 * (item_index + 1))) }} permit host {{ item }} log"
+        parents: ip access-list standard {{ acl_name }}
+        match: line
+      loop: "{{ updated_collector_ips }}"
+      loop_control:
+        index_var: item_index
+      when: (updated_collector_ips is defined) and (ansible_network_os == 'cisco.ios.ios') and (get_access_list.failed is false)
 
     - name: load new entry into new acl
       ios_config:
@@ -99,7 +137,18 @@
           - "10 permit host {{ collector_ip }} log"
         parents: ip access-list standard {{ acl_name }}
         match: line
-      when: (source_network | length < 1) and (ansible_network_os == 'cisco.ios.ios') and (get_access_list.failed is true) 
+      when: collector_ips is undefined and (source_network | length < 1) and (ansible_network_os == 'cisco.ios.ios') and (get_access_list.failed is true) 
+
+    - name: load new entries into new acl
+      ios_config:
+        lines:
+          - "{{ (10 * (item_index + 1)) }}  permit host {{ item }} log"
+        parents: ip access-list standard {{ acl_name }}
+        match: line
+      loop: "{{ updated_collector_ips }}"
+      loop_control:
+        index_var: item_index
+      when: (updated_collector_ips is defined) and (ansible_network_os == 'cisco.ios.ios') and (get_access_list.failed is true)
 
     - name: enable snmp on device
       ios_config:
@@ -113,21 +162,44 @@
         save_when: changed
       when: ansible_network_os == 'cisco.ios.ios'
 
-##NXOS Tasks##
+###NXOS Tasks##
 
-    - name: Load new entries into existing nxos acl
+    - name: Load new entry into existing nxos acl
       cisco.nxos.nxos_config:
-        lines: "{{ ace_name | last  | int + 10 }} permit ip {{ collector_ip }}/32 any log"
+        lines: "{{ (base_ace_number | int + 10 ) }} permit ip {{ collector_ip }}/32 any log"
         parents: ip access-list {{ acl_name }}
         match: line
-      when: (source_network | length < 1) and (ansible_network_os == 'cisco.nxos.nxos') and (get_access_list.failed is false)      
+      when: collector_ips is undefined and (source_network | length < 1) and (ansible_network_os == 'cisco.nxos.nxos') and (get_access_list.failed is false)      
 
-    - name: Load new entries into new nxos acl
+
+    - name: Load new entries from list into existing ACL with incremented ACE numbers
       cisco.nxos.nxos_config:
-        lines: "10 permit ip {{ collector_ip }}/32 any log"
+        lines:
+          - "{{ (base_ace_number | int + (10 * (item_index + 1))) }} permit ip {{ item }}/32 any log"
         parents: ip access-list {{ acl_name }}
         match: line
-      when: (source_network | length < 1) and (ansible_network_os == 'cisco.nxos.nxos') and (get_access_list.failed is true)      
+      loop: "{{ updated_collector_ips }}"
+      loop_control:
+        index_var: item_index
+      when: (updated_collector_ips is defined) and (ansible_network_os == 'cisco.nxos.nxos') and (get_access_list.failed is false)
+
+    - name: Load new entry into new nxos acl
+      cisco.nxos.nxos_config:
+        lines: "{{ (10 * (item_index + 1)) }} permit ip {{ collector_ip }}/32 any log"
+        parents: ip access-list {{ acl_name }}
+        match: line
+      when: collector_ips is undefined and (source_network | length < 1) and (ansible_network_os == 'cisco.nxos.nxos') and (get_access_list.failed is true)      
+
+    - name: load new entries into new acl
+      cisco.nxos.nxos_config:
+        lines:
+          - "{{ (10 * (item_index + 1)) }}  permit ip {{ item }}/32 any log"
+        parents: ip access-list {{ acl_name }}
+        match: line
+      loop: "{{ updated_collector_ips }}"
+      loop_control:
+        index_var: item_index
+      when: (updated_collector_ips is defined) and (ansible_network_os == 'cisco.nxos.nxos') and (get_access_list.failed is true)
 
     - name: enable snmp on nexus device
       cisco.nxos.nxos_config:
