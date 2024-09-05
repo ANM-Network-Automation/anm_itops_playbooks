@@ -38,11 +38,42 @@
       vars:
         matched_items: []
 
+
     - name: Check if collector is already a host
       set_fact:
-        host_exists: "{{ item }}"
+        host_exists: "{{ host_exists + item }}"
       loop: "{{ matched_items }}"
-      when: item['value'] == collector_ip
+      when: collector_ip is defined and item['value'] == collector_ip
+
+    - name: Check if collector is already a host
+      set_fact:
+        host_exists: "{{ host_exists + [item['value']] }}"
+      loop: "{{ matched_items }}"
+      when: collector_ips is defined and item['value'] in collector_ips
+      vars:
+        host_exists: []
+
+    - name: Remove items from updated_list1 that are in list2
+      set_fact:
+        host_ips: "{{ updated_collector_ips | difference(host_exists) }}"
+      when: collector_ips is defined
+      vars:
+        ansible_network_os: cisco.ios.ios
+
+    - name: Get all interfaces
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/api/fdm/latest/devices/default/interfaces"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ login['json']['access_token'] }}"
+        validate_certs: false
+      register: all_interfaces
+
+    - name: Get diag interface
+      set_fact:
+        diag_interface: "{{ item }}"
+      loop: "{{ all_interfaces['json']['items'] }}"
+      when: item['name'] == "diagnostic"
 
     - name: Create network object for collector
       ansible.builtin.uri:
@@ -60,23 +91,7 @@
           type: networkobject
         status_code: 200
       register: snmp_object
-      when: host_exists is undefined
-
-    - name: Get all interfaces
-      ansible.builtin.uri:
-        url: "https://{{ ansible_host }}/api/fdm/latest/devices/default/interfaces"
-        headers:
-          Accept: application/json
-          Authorization: "Bearer {{ login['json']['access_token'] }}"
-        validate_certs: false
-      register: all_interfaces
-      when: host_exists is undefined
-
-    - name: Get diag interface
-      set_fact:
-        diag_interface: "{{ item }}"
-      loop: "{{ all_interfaces['json']['items'] }}"
-      when: host_exists is undefined and item['name'] == "diagnostic"
+      when: host_exists is undefined and collector_ips is undefined
 
     - name: Create new SNMP host for collector
       ansible.builtin.uri:
@@ -105,11 +120,64 @@
             community: "{{ snmp_string | default('ANM_MS_R0') }}"
             type: "snmpv2csecurityconfiguration"
           type: snmphost
-
         status_code: 200
       register: snmp_object
-      when: host_exists is undefined
+      when: snmp_object['json'] is defined and host_exists is undefined and collector_ips is undefined
 
+    - name: Create network objects for collector
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/api/fdm/latest/object/networks"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ login['json']['access_token'] }}"
+        validate_certs: false
+        method: POST
+        body_format: json
+        body:
+          name: "ANM_SNMP_{{ item }}"
+          subType: HOST
+          value: "{{ item }}"
+          type: networkobject
+        status_code: 200
+      register: snmp_object_list
+      when: host_ips is defined and host_ips|length > 0 and collector_ips is defined
+      loop: "{{ host_ips }}"
+
+    - name: Create new SNMP host for collector
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/api/fdm/latest/object/snmphosts"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ login['json']['access_token'] }}"
+        validate_certs: false
+        method: POST
+        body_format: json
+        body:
+          name: "ANM_SNMP_{{ collector_ip }}"
+          interface:
+            id: "{{ diag_interface['id'] }}"
+            type: "{{ diag_interface['type'] }}"
+            name: "{{ diag_interface['name'] }}"
+          managerAddress:
+            version: "{{ snmp_object_list['results'][item_index]['json']['version'] }}"
+            name: "{{ snmp_object_list['results'][item_index]['json']['name'] }}"
+            id: "{{ snmp_object_list['results'][item_index]['json']['id'] }}"
+            type: "{{ snmp_object_list['results'][item_index]['json']['type'] }}"
+          udpPort: 162
+          pollEnabled: true
+          trapEnabled: false
+          securityConfiguration:
+            community: "{{ snmp_string | default('ANM_MS_R0') }}"
+            type: "snmpv2csecurityconfiguration"
+          type: snmphost
+        status_code: 200
+      register: snmp_object
+      when: host_ips is defined and host_ips|length > 0 and collector_ips is defined
+      loop: "{{ host_ips }}"
+      loop_control:
+        loop_var: collector_ip
+        index_var: item_index
+      
     - name: Deploy the changes
       ansible.builtin.uri:
         url: "https://{{ ansible_host }}/api/fdm/latest/operational/deploy"
@@ -120,7 +188,6 @@
         method: POST
         status_code: 200
       register: deploy
-      when: host_exists is undefined
 
     rescue:
       - name: Login failure
