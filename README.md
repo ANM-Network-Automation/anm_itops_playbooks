@@ -43,12 +43,17 @@ Supported OS:
 **Variables**   
 - `snmp_string`: The SNMP string to use
 - `enable_secret`: Optional: enable secret if device requires it
+- `collector_ips`: Optional: List type. Allows for multiple IP addresses of collectors to be passed separated by commas
+- `collector_ip`: Optional: Allows for single IP addresses to be passed
 
 **Examples**   
 ```bash
-ansible-playbook playbooks/update_snmp_acl.yml -e 'snmp_string=public enable_secret=SOMESECRET' --limit network -u admin -k
+ansible-playbook playbooks/update_snmp_acl.yml -i inventory.ini -e 'snmp_string=public enable_secret=SOMESECRET' --limit network -u admin -k
 ```
-
+Add a list of collectors
+```bash
+ansible-playbook playbooks/update_snmp_acl.yml -i inventory.ini -u admin -k -e 'collector_ips="1.2.3.4,1.2.3.5,1.2.3.6" snmp_string=welcome1'
+```
 -------------------------------------------------
 
 ### `create_accounts`
