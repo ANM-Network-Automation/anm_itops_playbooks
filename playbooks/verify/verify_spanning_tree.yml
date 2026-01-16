@@ -1,0 +1,135 @@
+---
+- name: Verify Spanning Tree Protocol (STP) on devices
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+
+  vars:
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+    output_file: "outputs/stp_check_summary_{{ lookup('pipe', 'date +%Y-%m-%d') }}.txt"
+    vlan: ""   # Optional: provide a VLAN ID to limit STP info
+
+  pre_tasks:
+
+    - name: Prompt for username
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input }}"
+      when: user_input is defined and user_input.user_input is defined
+
+    - name: Set password from prompt
+      set_fact:
+        ansible_password: "{{ pass_input.user_input }}"
+      when: pass_input is defined and pass_input.user_input is defined
+
+  tasks:
+
+    - name: Get STP summary
+      ios_command:
+        commands:
+          - show spanning-tree summary
+      register: stp_summary
+      ignore_errors: true
+
+    - name: Get STP VLAN info
+      ios_command:
+        commands: >
+          {% if vlan %}
+          show spanning-tree vlan {{ vlan }}
+          {% else %}
+          show spanning-tree vlan
+          {% endif %}
+      register: stp_vlan
+      ignore_errors: true
+
+    - name: Get STP interface roles and states
+      ios_command:
+        commands: >
+          {% if vlan %}
+          show spanning-tree vlan {{ vlan }} detail
+          {% else %}
+          show spanning-tree interface
+          {% endif %}
+      register: stp_interfaces
+      ignore_errors: true
+
+    - name: Store STP output in variable
+      set_fact:
+        saved_output: |
+          =======================================================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ lookup('pipe', 'date -u +\"%Y-%m-%d %H:%M:%S UTC\"') }}
+          VLAN Filter: {{ vlan | default('All VLANs') }}
+          =======================================================
+
+          === STP Summary ===
+          {% if stp_summary.stdout[0] is defined %}
+          {{ stp_summary.stdout[0] }}
+          {% else %}
+          No output received or command failed.
+          {% endif %}
+
+          === STP VLAN Info ===
+          {% if stp_vlan.stdout[0] is defined %}
+          {{ stp_vlan.stdout[0] }}
+          {% else %}
+          No output received or command failed.
+          {% endif %}
+
+          === STP Interfaces ===
+          {% if stp_interfaces.stdout[0] is defined %}
+          {{ stp_interfaces.stdout[0] }}
+          {% else %}
+          No output received or command failed.
+          {% endif %}
+
+          \n
+
+    - name: Ensure output directory exists
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.file:
+        path: "outputs"
+        state: directory
+        mode: '0755'
+
+    - name: Append STP output to single log file
+      delegate_to: localhost
+      run_once: false
+      ansible.builtin.lineinfile:
+        path: "{{ output_file }}"
+        create: yes
+        insertafter: EOF
+        line: "{{ saved_output }}"
+
+    - name: Display full aggregated STP log
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.slurp:
+        src: "{{ output_file }}"
+      register: final_log
+
+    - name: Print saved STP log contents
+      ansible.builtin.debug:
+        msg: |
+          =================== Aggregated STP Log ===================
+          {{ final_log['content'] | b64decode }}

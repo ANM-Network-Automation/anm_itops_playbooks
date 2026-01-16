@@ -1,0 +1,180 @@
+---
+- name: Add radius coa config
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+  vars_files:
+    - ./vars/aaa-servers.yml
+
+  vars:
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+
+
+  pre_tasks:
+
+    - name: Prompt for username
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for radius shared secret key
+      pause:
+        prompt: "Enter radius shared secret key (will not echo):"
+        echo: no
+      register: radius_key_prompt
+      when: radius_key is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input }}"
+      when: user_input is defined and user_input.user_input is defined
+
+    - name: Set password from prompt
+      set_fact:
+        ansible_password: "{{ pass_input.user_input }}"
+      when: pass_input is defined and pass_input.user_input is defined
+
+    - name: Set radius key variable
+      set_fact:
+        radius_key: "{{ radius_key_prompt.user_input }}"
+      when: radius_key is not defined
+
+  tasks:
+
+    ##########################################################
+    # 1. Gather existing radius configuration
+    ##########################################################
+    - name: Gather current named radius servers
+      ios_command:
+        commands:
+          - "show running-config | section ^radius server"
+      register: radius_config
+
+    - name: Gather dynamic-author section from running-config
+      ios_command:
+        commands:
+          - "show running-config | section ^aaa server radius dynamic-author"
+      register: dynamic_author_config
+
+    ##########################################################
+    # 2. Parse and Config
+    ##########################################################
+
+    - name: Initialize RADIUS server facts
+      set_fact:
+        existing_radius_map: {}
+        existing_radius_keys: {}
+
+    - name: Parse radius servers line-by-line
+      vars:
+        config_lines: "{{ radius_config.stdout[0].splitlines() }}"
+      block:
+        - name: Loop through config lines
+          set_fact:
+            existing_radius_map: >-
+              {{
+                (line.startswith('radius server') and
+                 existing_radius_map.update({line.split()[2]: (config_lines[config_lines.index(line)+1].split()[2] if 'address ipv4' in config_lines[config_lines.index(line)+1] else None)}) or existing_radius_map)
+              }}
+            existing_radius_keys: >-
+              {{
+                (line.startswith('radius server') and
+                 (config_lines[config_lines.index(line)+2].split(None,1)[1] if 'key ' in config_lines[config_lines.index(line)+2] else None)
+                 is not none and
+                 existing_radius_keys.update({line.split()[2]: config_lines[config_lines.index(line)+2].split(None,1)[1]}) or existing_radius_keys)
+              }}
+          loop: "{{ config_lines }}"
+          loop_control:
+            loop_var: line
+
+    - name: Parse existing dynamic-author client IPs
+      set_fact:
+        existing_dynamic_author_ips: >-
+          {{
+            dynamic_author_config.stdout[0].splitlines()
+            | map('regex_search', 'client\\s+(\\d+\\.\\d+\\.\\d+\\.\\d+)\\s+server-key', '\\1')
+            | select('string')
+            | list
+          }}
+
+    - name: Build list of currently configured radius IPs
+      set_fact:
+        existing_radius_ips: "{{ existing_radius_map.values() | list }}"
+
+    - name: Build servers_with_names (loop-based)
+      set_fact:
+        servers_with_names: []
+
+    - name: Append server_name to each required server
+      set_fact:
+        servers_with_names: >-
+          {{
+            servers_with_names + [server | combine({'server_name': (existing_radius_map | dict2items | selectattr('value','equalto', server.ip) | map(attribute='key') | list | first) | default(server.name) })]
+          }}
+      loop: "{{ radius_servers }}"
+      loop_control:
+        loop_var: server
+
+    - name: Determine missing servers for dynamic-author
+      set_fact:
+        servers_missing_dynamic_author: >-
+          {{
+            servers_with_names
+            | selectattr('ip','not in', existing_dynamic_author_ips)
+            | list
+          }}
+
+    ##########################################################
+    # 3. Configure CoA
+    ##########################################################
+
+    - name: Add or update COA servers (reuse existing key if present)
+      ios_config:
+        parents: "aaa server radius dynamic-author"
+        lines:
+          - "client {{ server.ip }} server-key {{ server.key }}"
+      loop: "{{ servers_with_names }}"
+      loop_control:
+        loop_var: server
+
+    ##########################################################
+    # 4. Save and verify
+    ##########################################################
+    - name: Save running configuration
+      ios_command:
+        commands:
+          - "write memory"
+      when: ansible_network_os in ['ios', 'iosxe']
+
+    - name: Verify radius and AAA configuration
+      ios_command:
+        commands:
+          - "show running-config | section dynamic-author"
+      register: verify_config
+      when: ansible_network_os in ['ios', 'iosxe']
+
+    - name: Display verification summary
+      debug:
+        msg: |
+          radius Configuration Verification
+          --------------------------------
+
+          --- dynamic-author (CoA) Section ---
+          {{ verify_config.stdout[0] | default('N/A') }}

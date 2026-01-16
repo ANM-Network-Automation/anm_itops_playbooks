@@ -1,0 +1,124 @@
+---
+- name: Show license information
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+
+  vars:
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+    output_file: "outputs/license_check_summary_{{ lookup('pipe', 'date +%Y-%m-%d') }}.txt"
+
+
+  pre_tasks:
+
+    - name: Prompt for username
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input }}"
+      when: user_input is defined and user_input.user_input is defined
+
+    - name: Set password from prompt
+      set_fact:
+        ansible_password: "{{ pass_input.user_input }}"
+      when: pass_input is defined and pass_input.user_input is defined
+
+  tasks:
+
+    - name: Get throughput
+      tags: pre-check, check-version, post-check, install
+      ios_command:
+        commands: 
+          - show platform hardware throughput crypto
+          - show platform hardware throughput level
+      register: throughput
+      ignore_errors: true
+
+    - name: Get license info
+      tags: pre-check, check-version, post-check, install
+      ios_command:
+        commands: 
+          - show license status
+          - show license all
+          - show license udi
+          - show license authorization
+      register: license_info
+      ignore_errors: true
+
+    - name: Store output in a formatted variable
+      set_fact:
+        saved_output: |
+          =======================================================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ lookup('pipe', 'date -u +\"%Y-%m-%d %H:%M:%S UTC\"') }}
+          =======================================================
+
+          === Throughput Info ===
+          {% if throughput is defined and throughput.stdout is defined %}
+          {% for cmd, output in throughput.stdout|zip(throughput.commands) %}
+          Command: {{ cmd }}
+          {{ output | default('No output or command unsupported.') }}
+          {% endfor %}
+          {% else %}
+          No throughput data collected.
+          {% endif %}
+
+          === License Info ===
+          {% if license_info is defined and license_info.stdout is defined %}
+          {% for cmd, output in license_info.stdout|zip(license_info.commands) %}
+          Command: {{ cmd }}
+          {{ output | default('No output or command unsupported.') }}
+          {% endfor %}
+          {% else %}
+          No license info collected.
+          {% endif %}
+
+          \n
+
+    - name: Ensure output directory exists
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.file:
+        path: "outputs"
+        state: directory
+        mode: '0755'
+
+    - name: Append device output to a single log file
+      delegate_to: localhost
+      run_once: false
+      ansible.builtin.lineinfile:
+        path: "{{ output_file }}"
+        create: yes
+        insertafter: EOF
+        line: "{{ saved_output }}"
+
+    - name: Display full aggregated log file contents
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.slurp:
+        src: "{{ output_file }}"
+      register: final_log
+
+    - name: Print saved log contents
+      ansible.builtin.debug:
+        msg: |
+          =================== Aggregated License Info Log ===================
+          {{ final_log['content'] | b64decode }}

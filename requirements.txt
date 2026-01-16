@@ -2,4 +2,7 @@
 
 ansible-pylibssh
 pyats
-genie 
+genie
+openpyxl
+pathlib
+selenium

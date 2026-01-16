@@ -1,0 +1,110 @@
+---
+- name: Add global radius settings
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+
+  vars:
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+    deadtime: "{{ deadtime | default(10) }}"
+    timeout: "{{ timeout | default(3) }}"
+    retries: "{{ retries | default(3) }}"
+    load_balance: "{{ load_balance | default('no') }}"
+    config_avp: "{{ config_avp | default('no') }}"
+    config_device_sensor: "{{ config_device_sensor | default('no') }}"
+
+  pre_tasks:
+
+    - name: Prompt for username
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input }}"
+      when: user_input is defined and user_input.user_input is defined
+
+    - name: Set password from prompt
+      set_fact:
+        ansible_password: "{{ pass_input.user_input }}"
+      when: pass_input is defined and pass_input.user_input is defined
+
+
+  tasks:
+
+    - name: Set RADIUS server global parameters
+      when: 
+        - ansible_network_os in ['ios', 'iosxe']
+        - load_balance == "no"
+      ios_config:
+        lines:
+          - "radius-server dead-criteria time {{ timeout }} tries {{ retries }}"
+          - "radius-server retransmit {{ retries }}"
+          - "radius-server timeout {{ timeout }}"
+          - "radius-server deadtime{{ deadtime }}"
+          - "no radius-server load-balance method least-outstanding"
+        match: line
+      ignore_errors: true
+
+
+    - name: Set RADIUS server global parameters
+      when: 
+        - ansible_network_os in ['ios', 'iosxe']
+        - load_balance == "yes"
+      ios_config:
+        lines:
+          - "radius-server dead-criteria time {{ timeout }} tries {{ retries }}"
+          - "radius-server retransmit {{ retries }}"
+          - "radius-server timeout {{ timeout }}"
+          - "radius-server deadtime{{ deadtime }}"
+          - "radius-server load-balance method least-outstanding"
+        match: line
+      ignore_errors: true
+
+
+    - name: Set RADIUS Access request AVP
+      when: 
+        - ansible_network_os in ['ios', 'iosxe']
+        - config_avp == "yes"
+      ios_config:
+        lines:
+          - "radius-server attribute 6 on-for-login-auth"
+          - "radius-server attribute 8 include-in-access-req"
+          - "radius-server attribute 25 access-request include"
+          - "radius-server attribute 31 mac format ietf"
+          - "radius-server attribute 31 send nas-port-detail"
+        match: line
+      ignore_errors: true
+
+    - name: Enable Device Sensor
+      when: 
+        - ansible_network_os in ['ios', 'iosxe']
+        - config_device_sensor == "yes"
+      ios_config:
+        lines:
+          - "device-sensor notify all-changes"
+          - "device-sensor accounting"
+        match: line
+      ignore_errors: true
+
+    - name: Save running configuration
+      ios_command:
+        commands:
+          - "write memory"
+      when: ansible_network_os in ['ios', 'iosxe']

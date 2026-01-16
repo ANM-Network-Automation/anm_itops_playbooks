@@ -1,0 +1,139 @@
+---
+- name: Verify VLANs and VTP on devices
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+
+  vars:
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+    output_file: "outputs/vlan_check_summary_{{ lookup('pipe', 'date +%Y-%m-%d') }}.txt"
+
+  pre_tasks:
+
+    - name: Prompt for username
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input }}"
+      when: user_input is defined and user_input.user_input is defined
+
+    - name: Set password from prompt
+      set_fact:
+        ansible_password: "{{ pass_input.user_input }}"
+      when: pass_input is defined and pass_input.user_input is defined
+
+  tasks:
+
+    - name: Get VLAN brief information
+      ios_command:
+        commands:
+          - show vlan brief
+      register: vlan_brief
+      ignore_errors: true
+
+    - name: Get VLAN status summary
+      ios_command:
+        commands:
+          - show vlan summary
+      register: vlan_summary
+      ignore_errors: true
+
+    - name: Get VLAN trunk interfaces
+      ios_command:
+        commands:
+          - show interfaces trunk
+      register: vlan_trunk
+      ignore_errors: true
+
+    - name: Get VTP status (if configured)
+      ios_command:
+        commands:
+          - show vtp status
+      register: vtp_status
+      ignore_errors: true
+
+    - name: Store VLAN and VTP output in variable
+      set_fact:
+        saved_output: |
+          =======================================================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ lookup('pipe', 'date -u +\"%Y-%m-%d %H:%M:%S UTC\"') }}
+          =======================================================
+
+          === VLAN Brief ===
+          {% if vlan_brief.stdout[0] is defined %}
+          {{ vlan_brief.stdout[0] }}
+          {% else %}
+          No output received or command failed.
+          {% endif %}
+
+          === VLAN Summary ===
+          {% if vlan_summary.stdout[0] is defined %}
+          {{ vlan_summary.stdout[0] }}
+          {% else %}
+          No output received or command failed.
+          {% endif %}
+
+          === VLAN Trunk Interfaces ===
+          {% if vlan_trunk.stdout[0] is defined %}
+          {{ vlan_trunk.stdout[0] }}
+          {% else %}
+          No output received or command failed.
+          {% endif %}
+
+          === VTP Status ===
+          {% if vtp_status.stdout[0] is defined %}
+          {{ vtp_status.stdout[0] }}
+          {% else %}
+          VTP not configured or command not supported.
+          {% endif %}
+
+          \n
+
+    - name: Ensure output directory exists
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.file:
+        path: "outputs"
+        state: directory
+        mode: '0755'
+
+    - name: Append VLAN and VTP output to single log file
+      delegate_to: localhost
+      run_once: false
+      ansible.builtin.lineinfile:
+        path: "{{ output_file }}"
+        create: yes
+        insertafter: EOF
+        line: "{{ saved_output }}"
+
+    - name: Display full aggregated VLAN and VTP log
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.slurp:
+        src: "{{ output_file }}"
+      register: final_log
+
+    - name: Print saved VLAN and VTP log contents
+      ansible.builtin.debug:
+        msg: |
+          =================== Aggregated VLAN & VTP Log ===================
+          {{ final_log['content'] | b64decode }}

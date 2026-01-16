@@ -1,0 +1,113 @@
+---
+- name: Run custom show command (aggregated single log file)
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+
+  vars:
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+    command: "{{ command }}"
+    # Shared log file (unique per playbook run)
+    output_file: "outputs/custom_command_summary_{{ lookup('pipe', 'date +%Y-%m-%d') }}.txt"
+
+  pre_tasks:
+
+    - name: Prompt for username
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for show command
+      pause:
+        prompt: "Enter show command to run on devices"
+        echo: yes
+      register: command_input
+      when: command is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input }}"
+      when: user_input is defined and user_input.user_input is defined
+
+    - name: Set password from prompt
+      set_fact:
+        ansible_password: "{{ pass_input.user_input }}"
+      when: pass_input is defined and pass_input.user_input is defined
+
+    - name: Set command from prompt
+      set_fact:
+        command: "{{ command_input.user_input }}"
+      when: command_input is defined and command_input.user_input is defined
+
+  tasks:
+
+    - name: Run custom command
+      ios_command:
+        commands:
+          - "{{ command }}"
+      register: command_output
+      ignore_errors: true
+
+    - name: Store formatted command output
+      set_fact:
+        saved_output: |
+          =======================================================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ lookup('pipe', 'date -u +\"%Y-%m-%d %H:%M:%S UTC\"') }}
+          Command: {{ command }}
+          =======================================================
+
+          {% if command_output.stdout[0] is defined %}
+          {{ command_output.stdout[0] }}
+          {% else %}
+          No output received or command failed.
+          {% endif %}
+
+          \n
+
+    - name: Ensure output directory exists
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.file:
+        path: "outputs"
+        state: directory
+        mode: '0755'
+
+    - name: Append output to a single shared log file
+      delegate_to: localhost
+      run_once: false
+      ansible.builtin.lineinfile:
+        path: "{{ output_file }}"
+        create: yes
+        insertafter: EOF
+        line: "{{ saved_output }}"
+
+    - name: Display full aggregated log file contents
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.slurp:
+        src: "{{ output_file }}"
+      register: final_log
+
+    - name: Print saved log contents
+      ansible.builtin.debug:
+        msg: |
+          =================== Aggregated Command Output Log ===================
+          {{ final_log['content'] | b64decode }}

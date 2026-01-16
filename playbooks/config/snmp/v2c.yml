@@ -1,0 +1,267 @@
+---
+- name: Configure SNMP v2c
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+  vars_files:
+    - ./vars/jumpboxes.yml
+
+  vars:
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+    snmp_acl_name: "anm-ms-snmp-acl-std"
+    snmp_community: "{{ community }}"
+
+  pre_tasks:
+
+    - name: Prompt for username
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for community
+      pause:
+        prompt: "Enter SNMP community"
+        echo: yes
+      register: community_input
+      when: community is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input }}"
+      when: user_input is defined and user_input.user_input is defined
+
+    - name: Set password from prompt
+      set_fact:
+        ansible_password: "{{ pass_input.user_input }}"
+      when: pass_input is defined and pass_input.user_input is defined
+
+    - name: Set community from prompt
+      set_fact:
+        snmp_community: "{{ community_input.user_input }}"
+      when: community_input is defined and community_input.user_input is defined
+
+  tasks:
+##########################################################
+# Build ACL lines in device-specific format (conditional)
+##########################################################
+
+    - name: Build ACL lines for IOS / IOS-XE
+      when: hostvars[inventory_hostname]['ansible_network_os'] in ['ios', 'iosxe']
+      set_fact:
+        acl_lines: "{{ snmp_allowed_ips | map('regex_replace','^(.*)$','permit \\1') | list }}"
+
+    - name: Build ACL lines for IOS-XR
+      when: hostvars[inventory_hostname]['ansible_network_os'] == 'iosxr'
+      set_fact:
+        acl_lines: "{{ snmp_allowed_ips | map('regex_replace','^(.*)$','permit \\1') | list }}"
+
+    - name: Build ACL lines for ASA
+      when: hostvars[inventory_hostname]['ansible_network_os'] == 'asa'
+      set_fact:
+        acl_lines: "{{ snmp_allowed_ips | map('regex_replace','^(.*)$','permit ip host \\1 any') | list }}"
+
+    # - name: Build ACL lines for NX-OS
+    #   when: hostvars[inventory_hostname]['ansible_network_os'] == 'nxos'
+    #   set_fact:
+    #     acl_lines: "{{ snmp_allowed_ips | map('regex_replace','^(.*)$','permit ip host \\1 any') | list }}"
+
+
+    ##########################################################
+    # Gather existing ACL
+    ##########################################################
+    - name: Get existing ACL
+      block:
+        - name: Get ACL IOS / IOS-XE
+          ios_command:
+            commands:
+              - "show running-config | section ip access-list standard {{ snmp_acl_name }}"
+          register: acl_raw_ios
+          when: hostvars[inventory_hostname]['ansible_network_os'] in ['ios','iosxe']
+
+        - name: Get ACL IOS-XR
+          iosxr_command:
+            commands:
+              - "show running-config | section ipv4 access-list {{ snmp_acl_name }}"
+          register: acl_raw_xr
+          when: hostvars[inventory_hostname]['ansible_network_os'] == 'iosxr'
+
+        - name: Get ACL ASA
+          asa_command:
+            commands:
+              - "show running-config access-list {{ snmp_acl_name }}"
+          register: acl_raw_asa
+          when: hostvars[inventory_hostname]['ansible_network_os'] == 'asa'
+
+        # - name: Get ACL NX-OS
+        #   nxos_command:
+        #     commands:
+        #       - "show access-lists {{ snmp_acl_name }}"
+        #   register: acl_raw_nxos
+        #   when: hostvars[inventory_hostname]['ansible_network_os'] == 'nxos'
+
+    ##########################################################
+    # Parse existing ACL IPs
+    ##########################################################
+
+    - name: Parse existing ACL IPs
+      set_fact:
+        existing_acl_ips: >-
+          {% set os = hostvars[inventory_hostname]['ansible_network_os'] | lower | trim %}
+          {% if os in ['ios','iosxe'] %}
+            {{ (acl_raw_ios.stdout[0] | default('')) 
+              | regex_findall('permit\s+(\d{1,3}(?:\.\d{1,3}){3})') }}
+          {% elif os == 'iosxr' %}
+            {{ (acl_raw_xr.stdout[0] | default('')) 
+              | regex_findall('permit\s+(\d{1,3}(?:\.\d{1,3}){3})') }}
+          {% elif os == 'asa' %}
+            {{ (acl_raw_asa.stdout[0] | default('')) 
+              | regex_findall('permit ip host (\d{1,3}(?:\.\d{1,3}){3}) any') }}
+          {% else %}
+            []
+          {% endif %}
+
+    ##########################################################
+    # Compute stale IPs
+    ##########################################################
+    - name: Convert existing ACL IPs string to a proper list
+      set_fact:
+        existing_acl_ips_list: "{{ existing_acl_ips | from_yaml }}"
+
+    - name: Compute stale IPs
+      set_fact:
+        remove_ips: "{{ existing_acl_ips_list | difference(snmp_allowed_ips) | list }}"
+
+    ##########################################################
+    # Remove stale entries
+    ##########################################################
+    - name: Remove stale ACL entries
+      block:
+        - name: Remove stale entries IOS / IOS-XE
+          ios_config:
+            parents: "ip access-list standard {{ snmp_acl_name }}"
+            lines: "{{ remove_ips | map('regex_replace','^(.*)$','no permit \\1') | list }}"
+          when: hostvars[inventory_hostname]['ansible_network_os'] in ['ios','iosxe'] and remove_ips | length > 0
+
+        - name: Remove stale entries IOS-XR
+          iosxr_config:
+            parents: "ipv4 access-list {{ snmp_acl_name }}"
+            lines: "{{ remove_ips | map('regex_replace','^(.*)$','no permit \\1') | list }}"
+          when: hostvars[inventory_hostname]['ansible_network_os'] == 'iosxr' and remove_ips | length > 0
+
+        - name: Remove stale entries ASA
+          asa_config:
+            parents: "access-list {{ snmp_acl_name }}"
+            lines: "{{ remove_ips | map('regex_replace','^(.*)$','no permit ip host \\1 any') | list }}"
+          when: hostvars[inventory_hostname]['ansible_network_os'] == 'asa' and remove_ips | length > 0
+
+        # - name: Remove stale entries NX-OS
+        #   nxos_config:
+        #     parents: "ip access-list {{ snmp_acl_name }}"
+        #     lines: "{{ remove_ips | map('regex_replace','^(.*)$','no permit ip host \\1 any') | list }}"
+        #   when: hostvars[inventory_hostname]['ansible_network_os'] == 'nxos' and remove_ips | length > 0
+
+    ##########################################################
+    # Apply ACL changes per platform (add/remove) & save
+    ##########################################################
+    - name: Add missing ACL entries
+      block:
+        - name: Add missing entries IOS / IOS-XE
+          ios_config:
+            parents: "ip access-list standard {{ snmp_acl_name }}"
+            lines: "{{ snmp_allowed_ips | difference(existing_acl_ips) | map('regex_replace','^(.*)$','permit \\1') | list }}"
+            save_when: always
+          when: hostvars[inventory_hostname]['ansible_network_os'] in ['ios','iosxe'] and (snmp_allowed_ips | difference(existing_acl_ips)) | length > 0
+
+        - name: Add missing entries IOS-XR
+          iosxr_config:
+            parents: "ipv4 access-list {{ snmp_acl_name }}"
+            lines: "{{ snmp_allowed_ips | difference(existing_acl_ips) | map('regex_replace','^(.*)$','permit \\1') | list }}"
+            save_when: always
+          when: hostvars[inventory_hostname]['ansible_network_os'] == 'iosxr' and (snmp_allowed_ips | difference(existing_acl_ips)) | length > 0
+
+        - name: Add missing entries ASA
+          asa_config:
+            parents: "access-list {{ snmp_acl_name }}"
+            lines: "{{ snmp_allowed_ips | difference(existing_acl_ips) | map('regex_replace','^(.*)$','permit ip host \\1 any') | list }}"
+            save_when: always
+          when: hostvars[inventory_hostname]['ansible_network_os'] == 'asa' and (snmp_allowed_ips | difference(existing_acl_ips)) | length > 0
+
+        # - name: Add missing entries NX-OS
+        #   nxos_config:
+        #     parents: "ip access-list {{ snmp_acl_name }}"
+        #     lines: "{{ snmp_allowed_ips | difference(existing_acl_ips) | map('regex_replace','^(.*)$','permit ip host \\1 any') | list }}"
+        #     save_when: always
+        #   when: hostvars[inventory_hostname]['ansible_network_os'] == 'nxos' and (snmp_allowed_ips | difference(existing_acl_ips)) | length > 0
+
+    ##########################################################
+    # Configure SNMP v2c community
+    ##########################################################
+    - name: Configure SNMP v2c RO
+      block:
+        - name: IOS / IOS-XE v2c Config
+          ios_config:
+            lines:
+              - "snmp-server community {{ snmp_community }} RO {{ snmp_acl_name }}"
+            match: exact
+            save_when: always
+          when: hostvars[inventory_hostname]['ansible_network_os'] in ['ios','iosxe']
+
+        - name: IOS-XR v2c Config
+          iosxr_config:
+            lines:
+              - "snmp-server community {{ snmp_community }} RO {{ snmp_acl_name }}"
+            match: exact
+            save_when: always
+          when: hostvars[inventory_hostname]['ansible_network_os'] == 'iosxr'
+
+        - name: ASA v2c Config
+          asa_config:
+            lines:
+              - "snmp-server community {{ snmp_community }} RO {{ snmp_acl_name }}"
+            match: exact
+            save_when: always
+          when: hostvars[inventory_hostname]['ansible_network_os'] == 'asa'
+
+        - name: NX-OS v2c Config
+          nxos_config:
+            lines:
+              - "snmp-server community {{ snmp_community }} group network-operator"
+            match: exact
+            save_when: always
+          when: hostvars[inventory_hostname]['ansible_network_os'] == 'nxos'
+        
+            
+        - name: Configure SNMP v2c ISE
+          when: "'acs' in group_names"
+          connection: network_cli
+          ansible.netcommon.cli_command:
+            command: |
+              configure terminal
+              snmp-server enable
+              snmp-server community {{ snmp_community }} ro
+              end
+              write memory
+
+    ##########################################################
+    # Show configured ACL
+    ##########################################################
+    - name: Show SNMP ACL configuration
+      debug:
+        msg: "SNMP ACL '{{ snmp_acl_name }}' configured with IPs: {{ snmp_allowed_ips }}"

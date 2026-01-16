@@ -1,0 +1,20 @@
+##There is a SNOW plugin that can dynamically create the inventory file from the CMDB, here’s is a draft. Would need a user and CMDB would need to be the single source of truth for the following fields:
+##ip address, ios type, platform 
+
+plugin: servicenow.servicenow.now
+instance: anm.service-now.com
+username: ansible_user
+password: "{{ vault_SNOW }}"
+vars:
+  - name
+  - ip_address
+  - os (ios or nxos)
+  - os_type (ios or iosxe)
+  - platform type (for image truth)
+groups:
+  switches: "'sys_class_name' = 'cmdb_ci_ip_switch'"
+  routers: "'sys_class_name' = 'cmdb_ci_ip_router'"
+query: "'ip_addressISNOTNULL'"
+
+##or operational status is not retired
+

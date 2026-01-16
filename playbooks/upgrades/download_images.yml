@@ -1,0 +1,50 @@
+---
+- name: Group Display and selection
+  hosts: localhost
+  gather_facts: false
+
+  vars_prompt:
+    - name: target_hosts
+      prompt: |
+        Available groups:
+        {% for g in groups.keys() | sort %}
+        - {{ g }}
+        {% endfor %}
+        Enter host(s) or group(s) separated by commas (e.g., router,switch1,switch4)
+      private: no
+    
+  tasks:
+    - name: Store answers as facts for next play
+      set_fact:
+        target_hosts: "{{ target_hosts }}"
+      run_once: true
+      no_log: true
+      
+- name: Ensure all required RADIUS servers are configured by IP (reuse or create with defined name)
+  hosts: "{{ hostvars['localhost']['target_hosts'].split(',') }}"
+  gather_facts: no
+  connection: network_cli
+
+  tasks:
+    - name: Get Cisco API Token
+      uri:
+        url: "https://cloudsso.cisco.com/as/token.oauth2"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: client_credentials
+          client_id: "{{ cisco_client_id }}"
+          client_secret: "{{ cisco_client_secret }}"
+      register: cisco_auth
+
+    - name: Get software by PID
+      uri:
+        url: "https://api.cisco.com/software/v3.0/downloads/products/{{ pid | upper() }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cisco_auth.json.access_token }}"
+        return_content: yes
+      register: cisco_software
+
+    - debug:
+        var: cisco_software.json

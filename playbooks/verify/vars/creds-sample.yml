@@ -1,0 +1,12 @@
+credential_sets:
+  - name: set1
+    username: admin
+    password: pass123
+
+  - name: set2
+    username: ops
+    password: Cisco123
+
+  - name: set3
+    username: readonly
+    password: readonly1

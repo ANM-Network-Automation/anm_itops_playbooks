@@ -1,0 +1,162 @@
+##IOS XE
+##Switches
+##9200 (XE LITE)
+c9200l_target_image: cat9k_lite_iosxe.17.12.06.SPA.bin
+c9200l_md5_hash: af68f876cddcd631d040671571668a85
+c9200l_image_size_bytes: 471084127
+c9200l_image_code: 17.12.06
+##9300, 9400, 9500, 9600
+c9000_target_image: cat9k_iosxe.17.12.06.SPA.bin
+c9000_md5_hash: 9cf21f6fadc89fea47596df3a2f5f2e7
+c9000_image_size_bytes: 1275070139
+c9000_image_code: 17.12.06
+##ie 9300 Series switches
+ie9300_target_image:
+ie9300_md5_hash:
+ie9300_image_size_bytes:
+ie9300_image_code:
+##3850 and 3650 series switches
+cat3k_target_image:
+cat3k_md5_hash: 
+cat3k_image_size_bytes:
+cat3k_image_code:
+##9410r
+c9410r_target_image:
+c9410r_md5_hash: 
+c9410r_image_size_bytes:
+c9410r_image_code:
+##9407r
+c9407r_target_image:
+c9407r_md5_hash: 
+c9407r_image_size_bytes:
+c9407r_image_code:
+
+
+##Routers
+##Catalyst 8000
+##c8200, c8200l, c8300
+c8000_target_image:
+c8000_md5_hash:
+c8000_image_size_bytes:
+c8000_image_code:
+##c8500
+c8500_target_image:
+c8500_md5_hash:
+c8500_image_size_bytes:
+c8500_image_code:
+##c8500l
+c8500l_target_image:
+c8500l_md5_hash:
+c8500l_image_size_bytes:
+c8500l_image_code:
+
+##ISR
+##isr4221
+isr4200_target_image:
+isr4200_md5_hash:
+isr4200_image_size_bytes:
+isr4200_image_code:
+##isr4321, isr4331, isr4351, 
+isr4300_target_image:
+isr4300_md5_hash:
+isr4300_image_size_bytes:
+isr4300_image_code:
+##isr4431, isr4451x
+isr4400_target_image:
+isr4400_md5_hash:
+isr4400_image_size_bytes:
+isr4400_image_code:
+##isr4461
+isr4400v2_target_image:
+isr4400v2_md5_hash:
+isr4400v2_image_size_bytes:
+isr4400v2_image_code:
+
+
+##ASR
+##asr1001x, asr1001hx, 1002hx 
+asr1000_target_image:
+asr1000_md5_hash:
+asr1000_image_size_bytes:
+asr1000_image_code:
+##asr1002x
+asr1002_target_image:
+asr1002_md5_hash:
+asr1002_image_size_bytes:
+asr1002_image_code:
+##asr1004
+asr1004_target_image:
+asr1004_md5_hash:
+asr1004_image_size_bytes:
+asr1004_image_code:
+##asr1006
+asr1006_target_image:
+asr1006_md5_hash:
+asr1006_image_size_bytes:
+asr1006_image_code:
+##asr1006x
+asr1006x_target_image:
+asr1006x_md5_hash:
+asr1006x_image_size_bytes:
+asr1006x_image_code:
+##asr1009x
+asr1009x_target_image:
+asr1009x_md5_hash:
+asr1009x_image_size_bytes:
+asr1009x_image_code:
+
+
+
+
+##IOS
+##Switches
+##c1000
+c1000_target_image: 
+c1000_md5_hash: 
+c1000_image_size_bytes: 
+c1000_image_code:
+##2960L
+c2960l_target_image: 
+c2960l_md5_hash: 
+c2960l_image_size_bytes: 
+c2960l_image_code:
+##2960S
+c2960s_target_image:
+c2960s_md5_hash:
+c2960s_image_size_bytes:
+c2960s_image_code:
+##2960c
+c2960c_target_image:
+c2960c_md5_hash:
+c2960c_image_size_bytes:
+c2960c_image_code:
+##2960cx
+c2960cx_target_image:
+c2960cx_md5_hash:
+c2960cx_image_size_bytes:
+c2960cx_image_code:
+##2960x 2960xr
+c2960x_target_image: c2960x-universalk9-mz.152-7.E13.bin
+c2960x_md5_hash: 03a1a35666ef516b35e487c31db8e9f9
+c2960x_image_size_bytes: 26796032
+c2960x_image_code: 15.2(7)E13
+##c3560cx
+c3560cx_target_image:
+c3560cx_md5_hash:
+c3560cx_image_size_bytes:
+c3560cx_image_code:
+##c3560
+c3560_target_image:
+c3560_md5_hash:
+c3560_image_size_bytes:
+c3560_image_code:
+##c3560x
+c3560x_target_image:
+c3560x_md5_hash:
+c3560x_image_size_bytes:
+c3560x_image_code:
+##3750x
+c3750x_target_image:
+c3750x_md5_hash:
+c3750x_image_size_bytes:
+c3750x_image_code:

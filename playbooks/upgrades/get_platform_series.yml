@@ -1,0 +1,42 @@
+# ansible-playbook playbooks/gio-temp/upgrades/get_platform_series.yml -e "target_hosts=c9200l"
+---
+- name: Get Device platforms Playbook
+  hosts: all
+  gather_facts: false
+  connection: network_cli
+
+  vars:
+    required_suffixes:
+      - "_target_image"
+      - "_md5_hash"
+      - "_image_size_bytes"
+      - "_image_code"
+
+  tasks:
+  
+    - name: Show platform for selected hosts/groups
+      debug:
+        var: hostvars[inventory_hostname]["platform_series"]
+
+    - name: Show platform series for selected hosts/groups
+      debug:
+        msg: |
+          Platform series in use:
+          {% for platform in ansible_play_hosts | map('extract', hostvars, 'platform_series') | select ('defined') | list | unique | sort %}
+          - {{ platform }}
+          {% endfor %}
+      run_once: true
+
+    # - name: Check that all of these platform series have correct values, if you see MISSING, verify images.yml
+    #   vars:
+    #     all_groups: "{{ groups.keys() | list }}"
+    #   debug:
+    #     msg: |
+    #       Group: {{ item }}
+    #       {% set expected_vars = required_suffixes | map('regex_replace', '^(.*)$', item ~ '\\1') | list %}
+    #       {% for key in expected_vars %}
+    #       - {{ key }}: {{ vars.get(key, 'MISSING') }}
+    #       {% endfor %}
+    #   loop: "{{ all_groups }}"
+    #   loop_control:
+    #     label: "{{ item }}"

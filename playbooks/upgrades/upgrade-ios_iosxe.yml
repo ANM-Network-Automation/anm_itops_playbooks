@@ -1,0 +1,164 @@
+---
+- name: Prestage Playbook
+  hosts: all
+  vars_files: 
+  - ./vars/images.yml
+  gather_facts: false
+  connection: network_cli
+
+  vars:
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+
+  pre_tasks:
+
+    - name: Prompt for username
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input }}"
+      when: user_input is defined and user_input.user_input is defined
+
+    - name: Set password from prompt
+      set_fact:
+        ansible_password: "{{ pass_input.user_input }}"
+      when: pass_input is defined and pass_input.user_input is defined
+    
+    - name: Load upgrade commands
+      include_vars:
+        file: ./vars/upgrade_commands.yml
+
+  roles:
+    - ansible-pyats
+
+  tasks:
+
+    - name: Install/Upgrade IOSXE Software
+      when: 
+        - device_mode == 'install' or device_mode == 'bundle'
+        - platform_os == 'ios_xe'
+      block:
+        - name: Save running configuration
+          ios_command:
+            commands:
+              - "write memory"
+          when: ansible_network_os in ['ios', 'iosxe']
+
+        - name: Installing Target IOSXE
+          ios_command:
+            commands:
+              - command: "{{ upgrade_command }}"
+          register: install_output
+          vars:
+            ansible_command_timeout: 1800
+
+        - name: waiting for {{ inventory_hostname }} to come back online
+          wait_for_connection:
+            delay: 60
+            sleep: 30
+            timeout: 900
+
+      rescue:
+        - name: Installation status check 
+          debug: msg='Upgrade process is having some trouble ...'
+
+
+      always:
+        - name: Print Install Results
+          debug: var=install_output.stdout_lines
+
+        - name: Gather facts after upgrade
+          ios_facts:
+
+        - name: Assert that switch is running with the target version after Upgrade
+          assert:
+            quiet: no
+            success_msg: "{{ inventory_hostname }} has been upgraded to {{ target_ver }}"
+            fail_msg: "Failed to upgrade the {{ inventory_hostname }}, it is still running {{ ansible_net_version }}"
+            that:
+              - "'{{ ansible_net_version }}' == '{{ target_ver }}'"
+
+
+        - name: Cleaning up unnecessary package files
+          ios_command:
+            commands:
+              - command: install remove inactive
+                prompt: Do you want to remove the above files?
+                answer: 'y'
+            wait_for:
+              - result[0] contains SUCCESS
+          register: cleanup_output
+          vars:
+            ansible_command_timeout: 300
+
+        - name: Print Cleanup Results
+          debug: var=cleanup_output.stdout_lines
+
+        ## Display message for Upgrade process completed.
+        - debug: msg="Upgrade completed."
+          
+    ## IOS Upgrade process starting 
+    - name: Install/Upgrade IOS Software
+      when: 
+        - device_mode == 'bundle'
+        - platform_os == 'ios'
+      block:
+        - name: Save running configuration
+          ios_command:
+            commands:
+              - "write memory"
+          when: ansible_network_os in ['ios', 'iosxe']
+
+        - name: Installing Target IOS
+          ios_command:
+            commands:
+              - command: "{{ upgrade_command }}"
+          register: install_output
+          vars:
+            ansible_command_timeout: 1800
+
+        - name: waiting for {{ inventory_hostname }} to come back online
+          wait_for_connection:
+            delay: 60
+            sleep: 30
+            timeout: 900
+
+      rescue:
+        - name: Installation status check 
+          debug: msg='Upgrade process is having some trouble ...'
+
+
+      always:
+        - name: Print Install Results
+          debug: var=install_output.stdout_lines
+
+        - name: Gather facts after upgrade
+          ios_facts:
+
+        - name: Assert that switch is running with the target version after Upgrade
+          assert:
+            quiet: no
+            success_msg: "{{ inventory_hostname }} has been upgraded to {{ target_ver }}"
+            fail_msg: "Failed to upgrade the {{ inventory_hostname }}, it is still running {{ ansible_net_version }}"
+            that:
+              - "'{{ ansible_net_version }}' == '{{ target_ver }}'"
+
+        ## Display message for Upgrade process completed.
+        - debug: msg="Upgrade completed."

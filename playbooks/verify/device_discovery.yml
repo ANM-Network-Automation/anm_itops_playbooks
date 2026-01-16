@@ -1,0 +1,165 @@
+---
+- name: Auto-discover Cisco / Palo Alto devices
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+
+  vars:
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+    discovered_info: {}
+
+  pre_tasks:
+    - name: Prompt for username if not set
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password if not set
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username/password from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input | default(ansible_user) }}"
+        ansible_password: "{{ pass_input.user_input | default(ansible_password) }}"
+
+  tasks:
+
+    - name: Attempt IOS / IOS-XE facts
+      ios_facts:
+        gather_subset: all
+      register: ios_facts
+      ignore_errors: true
+
+    - name: Attempt NXOS facts
+      nxos_facts:
+        gather_subset: all
+      register: nxos_facts
+      ignore_errors: true
+
+    - name: Attempt IOS-XR facts
+      iosxr_facts:
+        gather_subset: all
+      register: iosxr_facts
+      ignore_errors: true
+
+    - name: Attempt ASA facts
+      asa_facts:
+        gather_subset: all
+      register: asa_facts
+      ignore_errors: true
+
+    - name: Attempt PAN-OS facts
+      paloaltonetworks.panos.panos_op:
+        cmd: 'show system info'
+      register: panos_facts
+      ignore_errors: true
+
+    - name: Attempt FMC/FTD HTTPS login
+      uri:
+        url: "https://{{ inventory_hostname }}/login.cgi"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          username: "{{ ansible_user }}"
+          password: "{{ ansible_password }}"
+        validate_certs: no
+        status_code: [302]
+      register: fmc_facts
+      ignore_errors: true
+      delegate_to: localhost
+
+    - name: Determine device OS
+      set_fact:
+        detected_os: >-
+          {% if ios_facts is defined and ios_facts.failed is not defined %}
+            ios
+          {% elif nxos_facts is defined and nxos_facts.failed is not defined %}
+            nxos
+          {% elif iosxr_facts is defined and iosxr_facts.failed is not defined %}
+            iosxr
+          {% elif asa_facts is defined and asa_facts.failed is not defined %}
+            asa
+          {% elif panos_facts is defined and panos_facts.failed is not defined %}
+            panos
+          {% elif fmc_facts is defined and fmc_facts.failed is not defined %}
+            fmc/ftd
+          {% else %}
+            unknown
+          {% endif %}
+
+    - name: Collect structured device info
+      set_fact:
+        discovered_info: >-
+          {{
+            discovered_info | combine({
+              inventory_hostname: {
+                'hostname': ios_facts.ansible_facts.net_hostname
+                            | default(nxos_facts.ansible_facts.net_hostname, true)
+                            | default(asa_facts.ansible_facts.net_hostname, true)
+                            | default(iosxr_facts.ansible_facts.net_hostname, true)
+                            | default(panos_facts.stdout[0] if panos_facts is defined else 'unknown'),
+                'model': ios_facts.ansible_facts.net_model
+                         | default(nxos_facts.ansible_facts.net_model, true)
+                         | default(asa_facts.ansible_facts.net_model, true)
+                         | default(iosxr_facts.ansible_facts.net_model, true)
+                         | default('unknown'),
+                'ios_type': ios_facts.ansible_facts.ansible_net_ios | default(''),
+                'serial': ios_facts.ansible_facts.net_serialnum
+                          | default(nxos_facts.ansible_facts.net_serialnum, true)
+                          | default(asa_facts.ansible_facts.net_serialnum, true)
+                          | default(iosxr_facts.ansible_facts.net_serialnum, true)
+                          | default('unknown'),
+                'stack_serials': ios_facts.ansible_facts.net_stack_serials | default([]),
+                'current_ver': ios_facts.ansible_facts.net_version
+                               | default(nxos_facts.ansible_facts.net_version, true)
+                               | default(asa_facts.ansible_facts.net_version, true)
+                               | default(iosxr_facts.ansible_facts.net_version, true)
+                               | default('unknown'),
+                'device_mode': (ios_facts.ansible_facts.net_image
+                                | default(nxos_facts.ansible_facts.net_image, true))
+                               | regex_search('(install|bundle|ios)', ignorecase=True),
+                'flash_dir': ((ios_facts.ansible_facts.net_image
+                               | default(nxos_facts.ansible_facts.net_image, true)
+                               | default(asa_facts.ansible_facts.net_image, true)
+                               | default(iosxr_facts.ansible_facts.net_image, true))
+                               | split(':') | first | lower) + ':',
+                'neighbors': ios_facts.ansible_facts.net_neighbors
+                             | default(nxos_facts.ansible_facts.net_neighbors, true)
+                             | default({}),
+                'interfaces': ios_facts.ansible_facts.net_interfaces
+                              | default(nxos_facts.ansible_facts.net_interfaces, true)
+                              | default({})
+              }
+            })
+          }}
+
+    - name: Display discovered info per device
+      debug:
+        msg: "{{ discovered_info[inventory_hostname] }}"
+
+    - name: Ensure outputs directory exists
+      delegate_to: localhost
+      run_once: true
+      file:
+        path: outputs
+        state: directory
+        mode: '0755'
+
+    - name: Save all discovery results to file
+      delegate_to: localhost
+      run_once: true
+      copy:
+        content: "{{ discovered_info | to_nice_yaml }}"
+        dest: "outputs/discovered_devices_{{ now().strftime('%Y-%m-%d_%H-%M-%S') }}.yml"

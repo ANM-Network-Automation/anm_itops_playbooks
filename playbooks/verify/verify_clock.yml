@@ -1,0 +1,158 @@
+---
+- name: Show clock information
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+
+  vars:
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+    # Capture local time in UTC for reliable comparison
+    local_time_utc: "{{ lookup('pipe', 'date -u +\"%Y-%m-%d %H:%M:%S\"') }}"
+    time_diff_threshold_minutes: 2
+    output_file: "outputs/timecheck_summary_{{ lookup('pipe', 'date +%Y-%m-%d') }}.txt"
+
+
+
+  pre_tasks:
+
+    - name: Prompt for username
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input }}"
+      when: user_input is defined and user_input.user_input is defined
+
+    - name: Set password from prompt
+      set_fact:
+        ansible_password: "{{ pass_input.user_input }}"
+      when: pass_input is defined and pass_input.user_input is defined
+
+  tasks:
+
+    - name: Get current clock time from device
+      ios_command:
+        commands:
+          - show clock
+      register: device_clock
+      ignore_errors: true
+      tags: time
+
+    - name: Get NTP configuration (if any)
+      ios_command:
+        commands:
+          - show run | include ntp
+          - show ntp associations
+      register: ntp_info
+      ignore_errors: true
+      tags: ntp
+
+    - name: Parse device clock output to UTC (if available)
+      ansible.builtin.set_fact:
+        device_time_utc: >-
+          {{ (device_clock.stdout[0] | regex_search('([A-Z][a-z]{2} [A-Z][a-z]{2} [0-9]+ [0-9:]+ [0-9]+)', '\\1') | first | default('')) 
+             | to_datetime('%a %b %d %H:%M:%S %Y', tz='UTC') 
+             if device_clock.stdout[0] is defined else none }}
+      ignore_errors: true
+
+    - name: Convert local time to datetime object
+      ansible.builtin.set_fact:
+        local_time_utc_obj: "{{ local_time_utc | to_datetime('%Y-%m-%d %H:%M:%S', tz='UTC') }}"
+
+    - name: Calculate time difference (minutes)
+      ansible.builtin.set_fact:
+        time_difference: >-
+          {% if device_time_utc is defined and device_time_utc %}
+          {{ ((local_time_utc_obj - device_time_utc).total_seconds() / 60) | abs | round(2) }}
+          {% else %}
+          none
+          {% endif %}
+
+    - name: Store verification output in variable
+      ansible.builtin.set_fact:
+        saved_output: |
+          =======================================================
+          Device: {{ inventory_hostname }}
+          Timestamp: {{ local_time_utc }}
+          =======================================================
+
+          === Local (WSL) Time (UTC) ===
+          {{ local_time_utc }}
+
+          === Device Time (Raw Output) ===
+          {% if device_clock.stdout is defined %}
+          {{ device_clock.stdout[0] | default('No output or command unsupported.') }}
+          {% else %}
+          No time output received.
+          {% endif %}
+
+          === Time Comparison ===
+          {% if time_difference is defined and time_difference is not none %}
+          Time difference: {{ time_difference }} minutes
+          {% if time_difference > time_diff_threshold_minutes %}
+          WARNING: Device clock differs by more than {{ time_diff_threshold_minutes }} minutes.
+          {% else %}
+          Device clock is in sync.
+          {% endif %}
+          {% else %}
+          Could not calculate time difference.
+          {% endif %}
+
+          === NTP Configuration ===
+          {% if ntp_info.stdout is defined %}
+          {% for cmd, output in ntp_info.stdout|zip(ntp_info.commands) %}
+          Command: {{ cmd }}
+          {{ output | default('No output or command unsupported.') }}
+          {% endfor %}
+          {% else %}
+          No NTP information collected.
+          {% endif %}
+
+          \n
+
+    - name: Ensure output directory exists
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.file:
+        path: "outputs"
+        state: directory
+        mode: '0755'
+
+    - name: Append all device results into single file
+      delegate_to: localhost
+      run_once: false
+      ansible.builtin.lineinfile:
+        path: "{{ output_file }}"
+        create: yes
+        insertafter: EOF
+        line: "{{ saved_output }}"
+
+    - name: Display final aggregated log file contents
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.slurp:
+        src: "{{ output_file }}"
+      register: final_log
+
+    - name: Print saved log contents
+      ansible.builtin.debug:
+        msg: |
+          =================== Aggregated Time Check Log ===================
+          {{ final_log['content'] | b64decode }}

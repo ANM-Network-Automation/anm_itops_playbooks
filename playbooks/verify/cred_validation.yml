@@ -1,0 +1,150 @@
+---
+
+- name: Multi-credential tester for Cisco/Palo Alto platforms
+  hosts: all
+  gather_facts: false
+
+  pre_tasks:
+
+    - name: Ensure credential_sets variable is provided
+      fail:
+        msg: |
+          ERROR: No credential sets provided.
+
+          You must supply one or more credential sets using:
+          
+            -e '
+            credential_sets:
+              - { name: "set1", username: "admin", password: "pass123" }
+              - { name: "set2", username: "ops", password: "Cisco123" }
+            '
+
+          OR using a variables file:
+
+            -e @./vars/creds.yml
+
+          Example creds.yml format:
+
+            credential_sets:
+              - name: set1
+                username: admin
+                password: pass123
+              - name: set2
+                username: ops
+                password: Cisco123
+      when: credential_sets is not defined or credential_sets | length == 0
+
+  vars:
+    credential_sets:
+      - { name: "cred_set_1", username: "admin",    password: "pass123" }
+      - { name: "cred_set_2", username: "opsuser",  password: "cisco123" }
+
+    device_result:
+      success: false
+      using_cred: none
+
+  tasks:
+
+    - name: Try all provided credential sets
+      block:
+
+        - name: Test credential set
+          block:
+            - name: Apply credential set
+              set_fact:
+                ansible_user: "{{ item.username }}"
+                ansible_password: "{{ item.password }}"
+                ansible_become_password: "{{ item.password }}"
+
+            # -- DEVICE TYPE DETECTION --
+            - name: Test connectivity
+              block:
+                - name: IOS / IOS-XE test
+                  ios_command:
+                    commands: ["show version"]
+                  when: ansible_network_os in ["ios", "iosxe"]
+                  register: test_result
+
+                - name: ASA test
+                  asa_command:
+                    commands: ["show version"]
+                  when: ansible_network_os == "asa"
+                  register: test_result
+
+                - name: NXOS test
+                  nxos_command:
+                    commands: ["show version"]
+                  when: ansible_network_os == "nxos"
+                  register: test_result
+
+                - name: IOS-XR test
+                  iosxr_command:
+                    commands: ["show version"]
+                  when: ansible_network_os == "iosxr"
+                  register: test_result
+
+                - name: FMC HTTPS test
+                  uri:
+                    url: "https://{{ ansible_host }}/login.cgi"
+                    method: POST
+                    body_format: form-urlencoded
+                    body:
+                      username: "{{ ansible_user }}"
+                      password: "{{ ansible_password }}"
+                    validate_certs: no
+                    status_code: [302]
+                  when: ansible_network_os == "fmcansible"
+                  register: test_result
+
+                - name: ISE HTTPS test
+                  uri:
+                    url: "https://{{ ansible_host }}/admin/login.jsp"
+                    method: POST
+                    body_format: form-urlencoded
+                    body:
+                      j_username: "{{ ansible_user }}"
+                      j_password: "{{ ansible_password }}"
+                    validate_certs: no
+                    status_code: [302]
+                  when: ansible_network_os == "ise"
+                  register: test_result
+
+                - name: PAN-OS GUI test
+                  uri:
+                    url: "https://{{ ansible_host }}/api/?type=op&cmd=<show><system><info></info></system></show>"
+                    method: GET
+                    user: "{{ ansible_user }}"
+                    password: "{{ ansible_password }}"
+                    force_basic_auth: yes
+                    validate_certs: no
+                    status_code: [200]
+                  when: ansible_network_os == "panos"
+                  register: test_result
+
+              rescue:
+                - set_fact:
+                    test_result:
+                      failed: true
+
+            - name: Mark success if device responded
+              set_fact:
+                device_result:
+                  success: true
+                  using_cred: "{{ item.name }}"
+              when: test_result is defined and not test_result.failed
+
+          rescue:
+            - debug: msg="Credential set {{ item.name }} failed."
+
+      loop: "{{ credential_sets }}"
+      when: not device_result.success
+
+    - name: Final output for device
+      debug:
+        msg: >-
+          {{ inventory_hostname }} → 
+          {% if device_result.success %}
+            SUCCESS using {{ device_result.using_cred }}
+          {% else %}
+            FAILED (no credential sets worked)
+          {% endif %}

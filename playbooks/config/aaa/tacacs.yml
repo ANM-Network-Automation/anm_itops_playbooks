@@ -1,0 +1,299 @@
+#ansible-playbook playbooks/configuration/aaa/tacacs.yml -l 'c9200l' -e 'organization_prefix=ANM' -e 'ansible_user=user' -e 'ansible_password=password' -e 'tacacs_key=tacacs123'
+---
+- name: Standardize TACACS+ configuration with named method lists
+  hosts: all
+  gather_facts: no
+  connection: network_cli
+  vars_files:
+    - ./vars/aaa-servers.yml
+
+  vars:
+    organization_prefix: "{{ org_prefix | default('') }}"
+    prompt_for_prefix: "{{ organization_prefix == '' }}"
+    tacacs_group_name: "{{ organization_prefix }}-TACACS"
+    auth_method_list: "{{ organization_prefix }}-authc-tacacs"
+    authz_method_list: "{{ organization_prefix }}-authz-tacacs"
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+
+
+  pre_tasks:
+
+    - name: Prompt for username
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+    
+    - name: Prompt for organization prefix
+      run_once: true
+      delegate_to: localhost
+      pause:
+        prompt: "Enter your organization prefix (e.g., ANM, MST, LAB): "
+      register: org_prefix_input
+      when: prompt_for_prefix
+
+    - name: Prompt for TACACS shared secret key
+      pause:
+        prompt: "Enter TACACS+ shared secret key (will not echo):"
+        echo: no
+      register: tacacs_key_prompt
+      when: tacacs_key is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input }}"
+      when: user_input is defined and user_input.user_input is defined
+
+    - name: Set password from prompt
+      set_fact:
+        ansible_password: "{{ pass_input.user_input }}"
+      when: pass_input is defined and pass_input.user_input is defined
+
+    - name: Set organization prefix from prompt
+      set_fact:
+        organization_prefix: "{{ org_prefix_input.user_input | upper }}"
+      when: prompt_for_prefix
+
+    - name: Update naming convention variables
+      set_fact:
+        tacacs_group_name: "{{ group_name | default(organization_prefix ~ '-TACACS') }}"
+        auth_method_list: "{{ organization_prefix }}-authc"
+        authz_method_list: "{{ organization_prefix }}-authz"
+
+    - name: Set TACACS key variable
+      set_fact:
+        tacacs_key: "{{ tacacs_key_prompt.user_input }}"
+      when: tacacs_key is not defined
+
+
+    - name: Ensure AAA new-model is enabled
+      ios_config:
+        lines:
+          - "aaa new-model"
+        save_when: modified
+      when: ansible_network_os in ['ios', 'iosxe']
+
+
+  tasks:
+    ##########################################################
+    # 1. Gather existing TACACS configuration
+    ##########################################################
+    - name: Get current TACACS configuration
+      ios_command:
+        commands:
+          - "show running-config | include tacacs"
+      register: ios_tacacs_config
+      when: ansible_network_os in ['ios', 'iosxe']
+
+    - name: Extract existing tacacs server names
+      set_fact:
+        existing_named_servers: "{{ ios_tacacs_config.stdout[0] | regex_findall('tacacs server ([A-Za-z0-9_.-]+)') }}"
+      when: ansible_network_os in ['ios', 'iosxe']
+
+
+    - name: Gather current named TACACS servers
+      ios_command:
+        commands:
+          - "show running-config | section ^tacacs server"
+      register: tacacs_config
+
+    ##########################################################
+    # 2. Configure named TACACS+ servers
+    ##########################################################
+
+    - name: Initialize TACACS server facts
+      set_fact:
+        existing_tacacs_map: {}
+        existing_tacacs_keys: {}
+
+    - name: Parse TACACS servers line-by-line
+      vars:
+        config_lines: "{{ tacacs_config.stdout[0].splitlines() }}"
+      block:
+        - name: Loop through config lines
+          set_fact:
+            existing_tacacs_map: >-
+              {{
+                (line.startswith('tacacs server') and
+                 existing_tacacs_map.update({line.split()[2]: (config_lines[config_lines.index(line)+1].split()[2] if 'address ipv4' in config_lines[config_lines.index(line)+1] else None)}) or existing_tacacs_map)
+              }}
+            existing_tacacs_keys: >-
+              {{
+                (line.startswith('tacacs server') and
+                 (config_lines[config_lines.index(line)+2].split(None,1)[1] if 'key ' in config_lines[config_lines.index(line)+2] else None)
+                 is not none and
+                 existing_tacacs_keys.update({line.split()[2]: config_lines[config_lines.index(line)+2].split(None,1)[1]}) or existing_tacacs_keys)
+              }}
+          loop: "{{ config_lines }}"
+          loop_control:
+            loop_var: line
+
+    - name: Build list of currently configured TACACS IPs
+      set_fact:
+        existing_tacacs_ips: "{{ existing_tacacs_map.values() | list }}"
+
+    - name: Build servers_with_names (loop-based)
+      set_fact:
+        servers_with_names: []
+
+    - name: Append server_name to each required server
+      set_fact:
+        servers_with_names: >-
+          {{
+            servers_with_names + [server | combine({'server_name': (existing_tacacs_map | dict2items | selectattr('value','equalto', server.ip) | map(attribute='key') | list | first) | default(server.name) })]
+          }}
+      loop: "{{ tacacs_servers }}"
+      loop_control:
+        loop_var: server
+
+    - name: Add or update TACACS servers (reuse existing key if present)
+      ios_config:
+        parents: "tacacs server {{ server.server_name }}"
+        lines:
+          - "address ipv4 {{ server.ip }}"
+          - "{{ 'key ' ~ existing_tacacs_keys[server.server_name] if server.server_name in existing_tacacs_keys else 'key ' ~ (server.key | default(tacacs_key)) }}"
+      loop: "{{ servers_with_names }}"
+      loop_control:
+        loop_var: server
+
+
+    - name: Configure TACACS+ server group
+      ios_config:
+        parents: "aaa group server tacacs+ {{ tacacs_group_name }}"
+        lines: "{{ servers_with_names | map(attribute='server_name') | map('regex_replace', '^(.*)$', 'server name \\1') | list }}"
+
+
+    ##########################################################
+    # 4. Enforce AAA baseline configuration
+    ##########################################################
+    - name: Enforce AAA authentication/authorization/accounting
+      ios_config:
+        lines:
+          - "aaa authentication login {{ auth_method_list }} group {{ tacacs_group_name }} local enable"
+          - "aaa authentication login console group {{ tacacs_group_name }} local"
+          - "aaa authorization console"
+          - "aaa authentication enable default group {{ tacacs_group_name }} enable"
+          - "aaa authorization exec {{ authz_method_list }} group {{ tacacs_group_name }} local if-authenticated"
+          - "aaa accounting commands 1 default start-stop group {{ tacacs_group_name }}"
+          - "aaa accounting commands 5 default start-stop group {{ tacacs_group_name }}"
+          - "aaa accounting commands 15 default start-stop group {{ tacacs_group_name }}"
+          - "aaa accounting update newinfo periodic 120"
+        match: line
+      when: ansible_network_os in ['ios', 'iosxe']
+
+    ##########################################################
+    # 5. Configure VTY line authentication
+    ##########################################################
+    - name: Get available VTY lines
+      ios_command:
+        commands:
+          - "show running-config | section line vty"
+      register: vty_lines_output
+      when: ansible_network_os in ['ios', 'iosxe']
+
+    - name: Parse VTY line ranges (e.g., 0 4, 5 15, 0 31)
+      set_fact:
+        vty_groups: "{{ vty_lines_output.stdout[0] | regex_findall('line vty (\\d+)\\s+(\\d+)') | map('map', 'int') | list }}"
+      when: ansible_network_os in ['ios', 'iosxe']
+
+    - name: Configure VTY line login and authorization ranges
+      ios_config:
+        parents: "line vty {{ item.0 }} {{ item.1 }}"
+        lines:
+          - "login authentication {{ auth_method_list }}"
+          - "authorization exec {{ authz_method_list }}"
+        match: line
+      loop: "{{ vty_groups }}"
+      loop_control:
+        label: "VTY {{ item.0 }}-{{ item.1 }}"
+      when:
+        - ansible_network_os in ['ios', 'iosxe']
+        - vty_groups | length > 0
+
+    ##########################################################
+    # 6. Remove stale or deprecated TACACS configurations
+    ##########################################################
+    - name: Gather legacy tacacs-server lines (cleaned)
+      set_fact:
+        legacy_tacacs_lines: >-
+          {{
+            ios_tacacs_config.stdout[0]
+            | default('')
+            | regex_findall('(?m)^[ \t]*tacacs-server.*')    
+            | map('trim')                                   
+            | reject('equalto', '')               
+            | list
+          }}
+      when:
+        - ansible_network_os in ['ios', 'iosxe']
+
+    - name: Debug legacy tacacs-server lines (will remove)
+      debug:
+        msg:
+          - "Found {{ legacy_tacacs_lines | length }} legacy tacacs-server line(s):"
+          - "{{ legacy_tacacs_lines }}"
+      when:
+        - ansible_network_os in ['ios', 'iosxe']
+
+    - name: Remove legacy tacacs-server lines
+      ios_config:
+        lines: "{{ legacy_tacacs_lines | map('regex_replace','^(.*)$','no \\1') | list }}"
+      when:
+        - ansible_network_os in ['ios', 'iosxe']
+        - legacy_tacacs_lines | length > 0
+      register: remove_legacy_tacacs_result
+      ignore_errors: yes
+
+
+    ##########################################################
+    # 7. Save and verify
+    ##########################################################
+    - name: Save running configuration
+      ios_command:
+        commands:
+          - "write memory"
+      when: ansible_network_os in ['ios', 'iosxe']
+
+    - name: Verify TACACS+ and AAA configuration
+      ios_command:
+        commands:
+          - "show running-config | section tacacs"
+          - "show running-config | section aaa"
+          - "show running-config | section line vty"
+      register: verify_config
+      when: ansible_network_os in ['ios', 'iosxe']
+
+    - name: Display verification summary
+      debug:
+        msg: |
+          TACACS+ Configuration Verified
+          --------------------------------
+          Group: {{ tacacs_group_name }}
+          Authentication: {{ auth_method_list }}
+          Authorization: {{ authz_method_list }}
+          Servers: {{ tacacs_servers | map(attribute='name') | join(', ') }}
+
+          --- TACACS+ Section ---
+          {{ verify_config.stdout[0] | default('N/A') }}
+
+          --- AAA Section ---
+          {{ verify_config.stdout[1] | default('N/A') }}
+
+          --- VTY Lines Section ---
+          {{ verify_config.stdout[2] | default('N/A') }}

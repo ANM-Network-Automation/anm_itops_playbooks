@@ -1,0 +1,25 @@
+---
+radius_servers:
+  - name: server1
+    ip: 1.1.1.1
+    key: "{{ radius_key }}"
+    auth_port: 1812
+    acct_port: 1813
+
+  - name: server2
+    ip: 2.2.2.2
+    key: "{{ radius_key }}"
+    auth_port: 1812
+    acct_port: 1813
+
+  - name: server3
+    ip: 3.3.3.3
+    key: "{{ radius_key }}"
+    auth_port: 1812
+    acct_port: 1813
+
+tacacs_servers:
+  - name: server1
+    ip: 4.4.4.4
+    key: "{{ tacacs_key }}"
+    port: 49

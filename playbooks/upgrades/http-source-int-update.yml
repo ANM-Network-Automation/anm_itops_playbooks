@@ -1,0 +1,151 @@
+#ansible-playbook playbooks/gio-temp/upgrades/test-http-int.yml -e "target_hosts=c9200l" -e "ansible_user=user" -e 'ansible_password=password'
+---
+- name: Update HTTP Source Interface on Devices
+  hosts: all
+  gather_facts: false
+  connection: network_cli
+
+  vars:
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+
+  pre_tasks:
+    - name: Prompt for username
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input }}"
+      when: user_input is defined and user_input.user_input is defined
+
+    - name: Set password from prompt
+      set_fact:
+        ansible_password: "{{ pass_input.user_input }}"
+      when: pass_input is defined and pass_input.user_input is defined
+
+  tasks:
+
+    - name: Run on IOS
+      ios_command:
+        commands:
+          - "show ip interface brief | include {{ ansible_host }}"
+      register: ip_brief_ios
+      when: ansible_network_os == "ios"
+      ignore_errors: yes
+
+    - name: Run on IOS XR
+      iosxr_command:
+        commands:
+          - "show ipv4 interface brief | include {{ ansible_host }}"
+      register: ip_brief_iosxr
+      when: ansible_network_os == "iosxr"
+      ignore_errors: yes
+
+    - name: Run on NX-OS
+      nxos_command:
+        commands:
+          - "show ip interface brief | include {{ ansible_host }}"
+      register: ip_brief_nxos
+      when: ansible_network_os == "nxos"
+      ignore_errors: yes
+
+    - name: Consolidate ip_brief results
+      set_fact:
+        ip_brief: "{{ ip_brief_ios | default(ip_brief_iosxr) | default(ip_brief_nxos) }}"
+      no_log: true
+
+    - name: Extract interface name
+      set_fact:
+        ssh_interface: "{{ (ip_brief.stdout[0] | regex_search('^(\\S+)')) or '' }}"
+      when: ip_brief.stdout is defined and ip_brief.stdout[0] | trim != ''
+
+
+    - name: Verify interface was found
+      fail:
+        msg: "Could not determine SSH interface for {{ ansible_host }}"
+      when: ssh_interface is not defined or ssh_interface == ''
+
+    - name: Set HTTP Source
+      ios_config:
+        lines: "ip http client source-interface {{ ssh_interface }}"
+        replace: line
+        save_when: changed
+      when: 
+        - ssh_interface is defined 
+        - ssh_interface != ''
+        - ansible_network_os == "ios"
+
+    - name: Set HTTP source interface on IOS XR
+      iosxr_config:
+        lines: http client source-interface {{ ssh_interface }}
+        commit: yes
+        replace: line
+      when: 
+        - ssh_interface is defined 
+        - ssh_interface != ''
+        - ansible_network_os == "iosxr"
+
+    - name: Set HTTP source interface on NX-OS
+      nxos_config:
+        lines: "ip http client source-interface {{ ssh_interface }}"
+        replace: line
+        save_when: changed
+      when: 
+        - ssh_interface is defined 
+        - ssh_interface != ''
+        - ansible_network_os == "nxos"
+
+    - name: Verify HTTP source interface configuration (IOS)
+      ios_command:
+        commands:
+          - "show run | include http client source-interface"
+      register: http_config_verify_ios
+      when: 
+        - ansible_network_os == "ios"
+        - ssh_interface is defined and ssh_interface != ''
+
+    - name: Verify HTTP source interface configuration (IOS-XR)
+      iosxr_command:
+        commands:
+          - "show run | include http client source-interface"
+      register: http_config_verify_xr
+      when: 
+        - ansible_network_os == "iosxr"
+        - ssh_interface is defined and ssh_interface != ''
+    
+    - name: Verify HTTP source interface configuration (IOS-XR)
+      nxos_command:
+        commands:
+          - "show run | include http client source-interface"
+      register: http_config_verify_nxos
+      when: 
+        - ansible_network_os == "iosxr"
+        - ssh_interface is defined and ssh_interface != ''
+
+    - name: Consolidate http_config_verify results
+      set_fact:
+        http_config_verify: "{{ http_config_verify_ios | default(http_config_verify_xr) | default(http_config_verify_nxos) }}"
+
+    - name: Display verification results
+      debug:
+        msg: |
+          Configuration Verification for {{ ansible_host }}:
+          - Interface used: {{ ssh_interface }}
+          - Configuration found: {{ http_config_verify.stdout[0] | trim if http_config_verify.stdout[0] else 'Not configured' }}
+          - Status: {{ 'SUCCESS' if (ssh_interface in http_config_verify.stdout[0] | default('')) else 'FAILED' }}

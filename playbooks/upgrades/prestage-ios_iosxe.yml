@@ -1,0 +1,246 @@
+# ansible-playbook playbooks/gio-temp/upgrades/prestage-ios_iosxe.yml -e "target_hosts=c9200l" -e "ansible_user=user" -e 'ansible_password=password' -e "http_server=1.1.1.1"
+---
+- name: Prestage Playbook
+  hosts: all
+  vars_files: 
+  - ./vars/images.yml
+  gather_facts: false
+  connection: network_cli
+
+  vars:
+    ansible_become_password: "{{ enable | default(ansible_password) }}"
+    ansible_become: true
+    ansible_become_method: enable
+
+  pre_tasks:
+    - name: Prompt for http server
+      pause:
+        prompt: "Enter HTTP Server IP"
+        echo: yes
+      register: http_server_input
+      when: http_server is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for username
+      pause:
+        prompt: "Enter username"
+        echo: yes
+      register: user_input
+      when: ansible_user is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Prompt for password
+      pause:
+        prompt: "Enter password"
+        echo: no
+      register: pass_input
+      when: ansible_password is not defined
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set username from prompt
+      set_fact:
+        ansible_user: "{{ user_input.user_input }}"
+      when: user_input is defined and user_input.user_input is defined
+
+    - name: Set password from prompt
+      set_fact:
+        ansible_password: "{{ pass_input.user_input }}"
+      when: pass_input is defined and pass_input.user_input is defined
+
+    - name: Set server from prompt
+      set_fact:
+        http_server: "{{ http_server_input.user_input }}"
+      when: http_server_input is defined and http_server_input.user_input is defined
+
+
+  roles:
+    - ansible-pyats
+
+  tasks:
+
+    ##Check http server
+    - name: Check http availability
+      ansible.builtin.uri:
+        url: "http://{{ http_server }}/http/"
+        method: GET
+        status_code: 200
+      register: http_check_result
+      failed_when: http_check_result.status != 200
+      run_once: true
+      delegate_to: localhost
+
+    ##Gather Facts and set vars
+    - name: Gather facts for Devices
+      tags: pre-check, check-version, install, upgrade
+      ios_facts:
+        gather_subset:
+          - all
+
+    - name: Set all device facts
+      tags: pre-check, check-version, post-check, install
+      set_fact:
+        device_mode: "{{ 'install' if ansible_net_image is search('packages.conf') else 'bundle' }}"
+        target_image: "{{ lookup('vars', platform_series | lower + '_target_image') }}"
+        target_image_md5: "{{ lookup('vars', platform_series | lower + '_md5_hash') }}"
+        target_image_size: "{{ lookup('vars', platform_series | lower + '_image_size_bytes') }}"
+        target_image_size_kb: "{{ lookup('vars', platform_series | lower + '_image_size_bytes') | int / 1000 }}"
+        target_ver: "{{ lookup('vars', platform_series | lower + '_image_code') }}"
+        flash_dir: "{{ ansible_net_image | split(':') | first | lower }}:"
+        timestamp:  "{{ lookup('pipe','date \"+%Y-%m-%d\"') }}"
+        current_ver: "{{ ansible_net_version }}"
+        ios_type: "{{ ansible_net_iostype }}"
+        device_upgraded: false
+ 
+    - name: Check current files and disk space
+      tags: pre-check, install, image-check, image-copy
+      ios_command:
+        commands: 
+          - "dir {{ flash_dir }}"
+      register: filesystem_check
+      ignore_errors: yes
+
+    - name: Extract image presence and free space
+      tags: pre-check, install, image-check, image-copy
+      set_fact:
+        dir_image_check: "{{ filesystem_check.stdout[0] | regex_search(target_image, multiline=True) }}"
+        free_space: "{{ (filesystem_check.stdout[0] | regex_search('\\((\\d+) bytes free\\)', '\\1'))[0] | int }}"
+      when: filesystem_check.stdout is defined and filesystem_check.stdout[0] is defined
+
+    - name: Debug all device facts
+      debug:
+        msg: |
+          Device Configuration Facts:
+          ========================
+          Device Mode: {{ device_mode }}
+          Target Image: {{ target_image }}
+          Target Image MD5: {{ target_image_md5 }}
+          Target Image Size: {{ target_image_size }}
+          Target Image Size KB: {{ target_image_size_kb }}
+          Target Version: {{ target_ver }}
+          Flash Directory: {{ flash_dir }}
+          Timestamp: {{ timestamp }}
+          Current Version: {{ current_ver }}
+          IOS Type: {{ ios_type }}
+          Device Upgraded: {{ device_upgraded }}
+          Dir Image Check: {{ dir_image_check | default('NOT FOUND') }}
+          Free Space: {{ free_space | default('NOT CALCULATED') }}
+
+    ## Configuration backup
+    - name: Config Backup /opt/ansible_local/anm_itops_playbooks/backup
+      tags: backup, install
+      ios_config:
+        backup: yes
+        backup_options:
+          filename: "{{ inventory_hostname }}_backup_{{ timestamp }}.cfg"
+          dir_path: ./backup
+      register: config_output
+
+
+    #Check  if device is currently running target image, mark completed and succesful if so
+    - name: Assert that switch is NOT running with the target IOS
+      block:
+        - name: Check running image
+          assert:
+            success_msg: "{{ inventory_hostname }} not running target version {{ target_ver }}, current version is {{ current_ver }}"
+            fail_msg: "{{ inventory_hostname }} already running {{ target_ver }}"
+            that: current_ver != target_ver
+
+      rescue:
+        - name: Skipping Devices - Already running target image
+          set_fact:
+            device_upgraded: true
+
+    ## Check the disk space, fail device if not enough space
+    - name: Assert Enough Disk Space Available
+      when: not device_upgraded
+      tags: image-copy, install
+      assert:
+        success_msg: "Enough disk space is available to accommodate target image."
+        fail_msg: 'Not enough disk space available for the target image!'
+        that:
+          - free_space > target_image_size_kb
+
+
+    ## Copy the image via HTTP if image is not in flash
+    - name: Copy IOSXE Image if does NOT exists in the {{ flash_dir }} dir
+      when: not device_upgraded
+      block:
+        - name: Assert {{ flash_dir }} does NOT contain target image before copy
+          assert:
+            quiet: false
+            success_msg: '{{ target_image }} NOT in {{ flash_dir }}'
+            fail_msg: '{{ target_image }} was found in {{ flash_dir }}'
+            that:
+              - "target_image != dir_image_check"
+ 
+        - name: Copy IOSXE image file via HTTP
+          tags: image-copy, install
+          ios_command:
+            commands: 
+              - command: 'copy http://{{http_server}}/http/{{ target_image }} {{ flash_dir }}'
+                check_all: True  
+                prompt:
+                  - '{{ ("Destination filename [" + target_image + "]?") | regex_escape }}'
+                answer:
+                  - "\r" 
+            wait_for:
+              - result[0] contains {{ target_image_size }} bytes copied
+          vars:
+            ansible_command_timeout: 3600
+            ansible_connect_timeout: 3600
+          no_log: false
+          register: image_copy
+
+      rescue:
+        - name: Checks Status
+          debug:
+            msg: "Some checks are failed, please review the output..."
+
+    - name: Target image MD5 File Validation
+      when: not device_upgraded
+      tags: image-validate, install
+      ios_command:
+        commands:
+          - verify /md5 {{ flash_dir }}{{ target_image }} {{ target_image_md5 }}
+        wait_for:
+          - result[0] contains Verified
+      vars:
+        ansible_command_timeout: 3600
+        ansible_connect_timeout: 3600
+        #ansible_ssh_common_args: '-o ServerAliveInterval=30 -o ServerAliveCountMax=120'
+      register: image_validation_result
+
+    - name: Set upgrade command
+      when: not device_upgraded
+      set_fact:
+        upgrade_command: >-
+          {%- if device_mode == 'install' -%}
+            install add file {{ flash_dir }}{{ target_image }} activate commit
+          {%- elif device_mode == 'bundle' and platform_os == 'ios_xe' -%}
+            install add file {{ flash_dir }}{{ target_image }} activate commit
+          {%- elif platform_os == 'nxos' -%}
+            install all {{ flash_dir }}{{ target_image }}
+          {%- else -%}
+            archive download-sw {{ flash_dir }}{{ target_image }}
+          {%- endif -%}
+
+    - name: Append host upgrade info to YAML file
+      blockinfile:
+        path: ./vars/upgrade_commands.yml
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK for {{ inventory_hostname }}"
+        block: |
+          {{ inventory_hostname }}:
+            upgrade_command: "{{ upgrade_command }}"
+            target_ver: "{{ target_ver }}""
+            device_mode: "{{ device_mode }}"
+
+    - name: output results
+      when: not device_upgraded
+      debug:
+        msg: |
+          MD5 - {{ image_validation_result.stdout_lines | join('') | replace('.', '') }}
+          To upgrade use: {{ upgrade_command }}
